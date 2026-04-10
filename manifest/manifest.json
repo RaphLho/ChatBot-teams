@@ -1,0 +1,43 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+    "manifestVersion": "1.25",
+    "version": "1.0.0",
+    "id": "1d8da847-f4f7-4180-b2dd-39efbc6eeefe",
+    "packageName": "com.eduservices.teamsbot",
+    "developer": {
+        "name": "EduServices",
+        "websiteUrl": "https://www.eduservices.com",
+        "privacyUrl": "https://www.eduservices.com/privacy",
+        "termsOfUseUrl": "https://www.eduservices.com/termsofuse"
+    },
+    "icons": {
+        "color": "color.png",
+        "outline": "outline.png"
+    },
+    "name": {
+        "short": "EduBot IA",
+        "full": "Assistant Étudiant RAG (Mistral AI)"
+    },
+    "description": {
+        "short": "Assistant IA qui répond à vos questions sur les cours.",
+        "full": "Ce bot est un moteur conversationnel basé sur les documents des formateurs, capable de réaliser de la recherche intelligente grâce à Mistral Small 3.1 et ChromaDB. Il garde l'historique interactif."
+    },
+    "accentColor": "#0055ff",
+    "bots": [
+        {
+            "botId": "1d8da847-f4f7-4180-b2dd-39efbc6eeefe",
+            "scopes": [
+                "personal",
+                "team",
+                "groupchat"
+            ],
+            "isNotificationOnly": false,
+            "supportsFiles": false
+        }
+    ],
+    "permissions": [
+        "identity",
+        "messageTeamMembers"
+    ],
+    "validDomains": []
+}

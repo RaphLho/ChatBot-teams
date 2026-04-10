@@ -1,0 +1,104 @@
+# ===========================
+# Variables d'environnement
+# ===========================
+.env
+.env.local
+.env.*.local
+
+# ===========================
+# Node.js
+# ===========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnp
+.pnp.js
+
+# Logs
+logs/
+*.log
+
+# Build / dist
+dist/
+build/
+out/
+
+# Cache
+.cache/
+.npm/
+.eslintcache
+.parcelcache
+
+# ===========================
+# Docker
+# ===========================
+.docker/
+
+# ===========================
+# Base de données / Données vectorielles
+# ===========================
+data/
+vector_store/
+chroma_db/
+*.db
+*.sqlite
+
+# PDFs uploadés / documents locaux (si stockés dans le projet)
+docs/uploaded/
+uploads/
+
+# ===========================
+# Système d'exploitation
+# ===========================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+
+# ===========================
+# Éditeurs & IDEs
+# ===========================
+
+# VSCode
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# JetBrains
+.idea/
+*.iml
+
+# ===========================
+# Clés & Secrets
+# ===========================
+*.pem
+*.key
+*.cert
+*.p12
+secrets/
+credentials/
+
+# ===========================
+# Divers
+# ===========================
+*.tmp
+*.bak
+*.swp
+coverage/
+.nyc_output/

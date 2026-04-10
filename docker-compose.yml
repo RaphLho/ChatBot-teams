@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3978:3978"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - MICROSOFT_APP_ID=${MICROSOFT_APP_ID}
+      - MICROSOFT_APP_PASSWORD=${MICROSOFT_APP_PASSWORD}
+      - MICROSOFT_APP_TENANT_ID=${MICROSOFT_APP_TENANT_ID}
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_URL=http://chromadb:8000
+    depends_on:
+      - redis
+      - chromadb
+    volumes:
+      - ./docs:/app/docs
+      - ./vector_db:/app/vector_db
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./vector_db:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
+volumes:
+  redis_data:
