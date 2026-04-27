@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse - Assistant RAG</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .dashboard {
+            padding: 40px;
+            overflow-y: auto;
+            flex: 1;
+            background: var(--chat-bg);
+            border-radius: 24px 0 0 24px;
+        }
+
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .dashboard-header h1 {
+            font-size: 2rem;
+            color: var(--text-primary);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.03);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(240, 98, 146, 0.1);
+            border-color: var(--primary-light);
+        }
+
+        .stat-icon {
+            font-size: 2rem;
+            margin-bottom: 16px;
+        }
+
+        .stat-title {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            background: var(--user-msg-bg);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-desc {
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+
+        .notice-card {
+            background: var(--primary-light);
+            border: 1px solid rgba(240, 98, 146, 0.2);
+            padding: 20px;
+            border-radius: var(--radius);
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 40px;
+        }
+        .notice-icon { font-size: 1.5rem; }
+        .notice-content p { color: var(--primary-dark); line-height: 1.5; font-size: 0.95rem; }
+        
+        .refresh-btn {
+            background: white;
+            border: 1px solid var(--border);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .refresh-btn:hover {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            border-color: var(--primary);
+        }
+
+        .link-back {
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Identical -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Assistant RAG</h2>
+                <span class="badge">Mistral AI</span>
+            </div>
+            <div class="sidebar-content">
+                <p class="sidebar-desc">Tableau de bord et télémétrie de la consommation système.</p>
+                <div class="status-indicator">
+                    <span class="pulse"></span> 
+                    En ligne et prêt
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <a href="/" class="secondary-btn link-back">← Retour au Chat</a>
+            </div>
+        </aside>
+
+        <!-- Dashboard -->
+        <main class="dashboard">
+            <div class="dashboard-header">
+                <h1>Statistiques de Consommation</h1>
+                <button class="refresh-btn" id="refresh-btn">
+                    🔄 Rafraîchir les données
+                </button>
+            </div>
+
+            <div class="notice-card">
+                <div class="notice-icon">ℹ️</div>
+                <div class="notice-content">
+                    <p><strong>Note Technique :</strong> Les APIs de Mistral AI ne fournissent pas d'accès direct au "solde" global de facturation de votre compte.<br>Ces statistiques correspondent à **la télémétrie interne enregistrée** depuis le dernier lancement de la commande <code>npm start</code>.</p>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🧠</div>
+                    <div class="stat-title">Jetons (Prompt)</div>
+                    <div class="stat-value" id="stat-prompt">0</div>
+                    <div class="stat-desc">Tokens utilisés pour le contexte et l'historique</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">✍️</div>
+                    <div class="stat-title">Jetons (Réponse)</div>
+                    <div class="stat-value" id="stat-completion">0</div>
+                    <div class="stat-desc">Tokens générés par Mistral en réponse</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-title">Session Totale</div>
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-desc">Total consommé sur cette session</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">💬</div>
+                    <div class="stat-title">Interactions</div>
+                    <div class="stat-value" id="stat-conversations">0</div>
+                    <div class="stat-desc">Questions traitées par l'Assistant</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">📚</div>
+                    <div class="stat-title">Fichiers Lus</div>
+                    <div class="stat-value" id="stat-files">0</div>
+                    <div class="stat-desc">Documents scannés dans /docs</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🗃️</div>
+                    <div class="stat-title">Blocs Indexés</div>
+                    <div class="stat-value" id="stat-chunks">0</div>
+                    <div class="stat-desc">Segments de mémoire vectorielle RAM</div>
+                </div>
+            </div>
+            
+            <p style="color:var(--text-secondary); text-align:center; font-size: 0.9rem;" id="uptime-text">Uptime: Calcul en cours...</p>
+
+        </main>
+    </div>
+
+    <script src="analyse.js"></script>
+</body>
+</html>
