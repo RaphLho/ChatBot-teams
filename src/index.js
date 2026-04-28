@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import botbuilder from 'botbuilder';
-import fs from 'fs';
+import { BotFrameworkAdapter } from 'botbuilder';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -9,36 +8,29 @@ const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const xlsx = require('xlsx');
-const WordExtractor = require('word-extractor');
-const wordExtractor = new WordExtractor();
 import { Mistral } from '@mistralai/mistralai';
 import RAGBot from './bot.js';
 import botStats from './stats.js';
-
-const { CloudAdapter, ConfigurationServiceClientCredentialFactory, ConfigurationBotFrameworkAuthentication } = botbuilder;
+import { fetchDocuments } from './onedriveClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const docsPath = path.join(__dirname, '../docs');
 
-const app = express();
-app.use(express.json());
-
-const credentialsFactory = new ConfigurationServiceClientCredentialFactory({
-    MicrosoftAppId: process.env.MICROSOFT_APP_ID,
-    MicrosoftAppPassword: process.env.MICROSOFT_APP_PASSWORD,
-    MicrosoftAppTenantId: process.env.MICROSOFT_APP_TENANT_ID
+// --- BOT FRAMEWORK ADAPTER ---
+const adapter = new BotFrameworkAdapter({
+    appId: process.env.MICROSOFT_APP_ID,
+    appPassword: process.env.MICROSOFT_APP_PASSWORD,
 });
-
-const botFrameworkAuthentication = new ConfigurationBotFrameworkAuthentication({}, credentialsFactory);
-const adapter = new CloudAdapter(botFrameworkAuthentication);
 
 adapter.onTurnError = async (context, error) => {
     console.error(`\n [onTurnError]: ${error}`);
     await context.sendActivity("Le bot a subi une erreur interne.");
 };
 
-// --- DECOUPAGE DU TEXTE (sans LangChain) ---
+const app = express();
+app.use(express.json());
+
+// --- DECOUPAGE DU TEXTE ---
 function splitText(text, chunkSize = 1000, overlap = 200) {
     const chunks = [];
     let start = 0;
@@ -59,7 +51,6 @@ class LocalRamVectorStore {
 
     async addDocuments(chunks) {
         console.log(`   ↳ Envoi de ${chunks.length} blocs à Mistral pour embedding...`);
-        // Traitement par lots de 32 pour ne pas dépasser les limites de l'API
         const batchSize = 32;
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
@@ -80,14 +71,12 @@ class LocalRamVectorStore {
     async similaritySearch(query, k = 3) {
         if (this.documents.length === 0) return [];
 
-        // Calcul de l'embedding pour la question
         const response = await this.mistralClient.embeddings.create({
             model: 'mistral-embed',
             inputs: [query],
         });
         const queryVector = response.data[0].embedding;
 
-        // Calcul de la similarité cosinus
         const scores = this.documents.map(doc => {
             let dot = 0, normA = 0, normB = 0;
             for (let i = 0; i < queryVector.length; i++) {
@@ -103,12 +92,11 @@ class LocalRamVectorStore {
     }
 }
 
-// --- EXTRACTION DE TEXTE UNIVERSELLE ---
-async function extractTextFromFile(filePath, ext) {
+// --- EXTRACTION DE TEXTE DEPUIS UN BUFFER ---
+async function extractTextFromBuffer(buffer, ext) {
     switch (ext) {
         case '.pdf':
-            const dataBuffer = fs.readFileSync(filePath);
-            const pdfData = await pdfParse(dataBuffer);
+            const pdfData = await pdfParse(buffer);
             return pdfData.text;
         case '.md':
         case '.txt':
@@ -116,18 +104,13 @@ async function extractTextFromFile(filePath, ext) {
         case '.json':
         case '.xml':
         case '.csv':
-            return fs.readFileSync(filePath, 'utf8');
+            return buffer.toString('utf8');
         case '.docx':
-            const docxData = await mammoth.extractRawText({ path: filePath });
+            const docxData = await mammoth.extractRawText({ buffer });
             return docxData.value;
-        case '.doc':
-        case '.word':
-            const docData = await wordExtractor.extract(filePath);
-            return docData.getBody();
         case '.xlsx':
         case '.xls':
-        case '.excel':
-            const workbook = xlsx.readFile(filePath);
+            const workbook = xlsx.read(buffer, { type: 'buffer' });
             let text = "";
             for (const sheetName of workbook.SheetNames) {
                 const sheet = workbook.Sheets[sheetName];
@@ -140,71 +123,51 @@ async function extractTextFromFile(filePath, ext) {
     }
 }
 
-// --- INGESTION DES DOCUMENTS ---
+// --- INDEXATION DES DOCUMENTS ---
 let vectorStore = null;
 let bot_instance = null;
-
-function getAllSupportedFiles(dir, supportedExts, fileList = []) {
-    const files = fs.readdirSync(dir);
-    for (const file of files) {
-        const filePath = path.join(dir, file);
-        if (fs.statSync(filePath).isDirectory()) {
-            getAllSupportedFiles(filePath, supportedExts, fileList);
-        } else {
-            const ext = path.extname(file).toLowerCase();
-            if (supportedExts.includes(ext)) {
-                fileList.push(filePath);
-            }
-        }
-    }
-    return fileList;
-}
 
 async function initKnowledgeBase(mistralClient) {
     console.log("------------------------------------------");
     console.log("🔄 Indexation des documents en cours...");
 
-    if (!fs.existsSync(docsPath)) {
-        fs.mkdirSync(docsPath, { recursive: true });
-        console.log("⚠️  Dossier /docs créé. Ajoutez des documents dedans et relancez.");
+    let documents;
+    try {
+        documents = await fetchDocuments();
+    } catch (err) {
+        console.error("❌ Erreur de connexion OneDrive:", err.message);
+        console.log("⚠️  Le bot démarrera sans base de connaissance.");
         return null;
     }
 
-    const supportedExts = ['.pdf', '.md', '.txt', '.texte', '.json', '.xml', '.csv', '.docx', '.doc', '.word', '.xlsx', '.xls', '.excel'];
-    
-    const filePaths = getAllSupportedFiles(docsPath, supportedExts);
-
-    if (filePaths.length === 0) {
-        console.log("⚠️  Aucun document supporté dans /docs. Le bot fonctionnera sans base de cours.");
+    if (!documents || documents.length === 0) {
+        console.log("⚠️  Aucun document trouvé. Le bot fonctionnera sans base de cours.");
         return null;
     }
 
     const store = new LocalRamVectorStore(mistralClient);
     let allChunks = [];
 
-    for (const filePath of filePaths) {
-        const relativeName = path.relative(docsPath, filePath);
-        console.log(`📄 Lecture : ${relativeName}`);
-        const ext = path.extname(filePath).toLowerCase();
-        
+    for (const doc of documents) {
+        console.log(`📄 Traitement : ${doc.name}`);
         try {
-            const text = await extractTextFromFile(filePath, ext);
+            const text = await extractTextFromBuffer(doc.buffer, doc.ext);
             if (text && text.trim().length > 0) {
                 const chunks = splitText(text, 1000, 200);
-                chunks.forEach(c => allChunks.push({ text: c, source: relativeName }));
+                chunks.forEach(c => allChunks.push({ text: c, source: doc.name }));
             } else {
-                console.log(`   ⚠️ Document vide ou illisible : ${relativeName}`);
+                console.log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
             }
         } catch (e) {
-            console.error(`   ❌ Impossible de lire ${relativeName}:`, e.message);
+            console.error(`   ❌ Impossible de lire ${doc.name}:`, e.message);
         }
     }
 
     if (allChunks.length > 0) {
         await store.addDocuments(allChunks);
-        console.log(`✅ ${allChunks.length} blocs indexés en mémoire RAM !`);
+        console.log(`✅ ${allChunks.length} blocs indexés !`);
         botStats.totalChunksIndexed += allChunks.length;
-        botStats.totalFilesParsed += filePaths.length;
+        botStats.totalFilesParsed += documents.length;
     }
 
     return store;
@@ -213,23 +176,20 @@ async function initKnowledgeBase(mistralClient) {
 // --- DEMARRAGE DU SERVEUR ---
 const PORT = process.env.PORT || 3978;
 
-// Servir l'interface web statique
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Point d'entrée pour Microsoft Teams / Bot Framework
 app.post('/api/messages', async (req, res) => {
     if (!bot_instance) return res.status(503).send("Bot en cours d'initialisation...");
-    await adapter.process(req, res, (context) => bot_instance.run(context));
+    await adapter.processActivity(req, res, (context) => bot_instance.run(context));
 });
 
-// Point d'entrée pour l'Interface Web (sans Bot Framework)
+// Point d'entrée pour l'Interface Web
 app.post('/api/chat', async (req, res) => {
     if (!bot_instance) return res.status(503).json({ error: "Bot en cours d'initialisation..." });
-    
     try {
         const { question, userId = "web_user" } = req.body;
         if (!question) return res.status(400).json({ error: "Question manquante" });
-        
         const answer = await bot_instance.askQuestion(question, userId);
         res.json({ answer });
     } catch (error) {
@@ -238,11 +198,32 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// Route Statistiques Télémétrie
+// Route Statistiques
 app.get('/api/stats', (req, res) => {
     const uptimeMs = Date.now() - botStats.startTime;
     res.json({ ...botStats, uptime: uptimeMs });
 });
+
+// --- ACTUALISATION AUTOMATIQUE ---
+let isRefreshing = false;
+let mistralGlobal = null;
+
+async function refreshKnowledgeBase() {
+    if (isRefreshing || !mistralGlobal) return;
+    isRefreshing = true;
+    try {
+        console.log("\n⏱️ Actualisation automatique de la base de connaissance OneDrive...");
+        const newStore = await initKnowledgeBase(mistralGlobal);
+        if (newStore && bot_instance) {
+            bot_instance.vectorStore = newStore;
+            console.log("🔄 Base de connaissance mise à jour avec succès en mémoire (sans redémarrer le bot) !");
+        }
+    } catch (e) {
+         console.error("❌ Erreur lors de l'actualisation automatique:", e);
+    } finally {
+        isRefreshing = false;
+    }
+}
 
 app.listen(PORT, async () => {
     console.log(`\n🌐 Serveur démarré sur le port ${PORT}`);
@@ -252,9 +233,16 @@ app.listen(PORT, async () => {
         process.exit(1);
     }
 
-    const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
-    vectorStore = await initKnowledgeBase(mistral);
-    bot_instance = new RAGBot(vectorStore, mistral);
+    mistralGlobal = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
+    vectorStore = await initKnowledgeBase(mistralGlobal);
+    bot_instance = new RAGBot(vectorStore, mistralGlobal);
+
+    // Route permettant d'actualiser manuellement (ex: via un bouton ou Postman)
+    app.post('/api/refresh', async (req, res) => {
+        if (isRefreshing) return res.status(429).json({ status: "Déjà en cours d'actualisation" });
+        await refreshKnowledgeBase();
+        res.json({ status: "Base de connaissances mise à jour avec succès !" });
+    });
 
     console.log("------------------------------------------");
     console.log(`🚀 BOT PRÊT ! Connectez Bot Framework Emulator sur : http://localhost:${PORT}/api/messages`);
