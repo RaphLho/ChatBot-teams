@@ -10,8 +10,9 @@ const mammoth = require('mammoth');
 const xlsx = require('xlsx');
 import { Mistral } from '@mistralai/mistralai';
 import RAGBot from './bot.js';
-import botStats from './stats.js';
-import { fetchDocuments } from './onedriveClient.js';
+import botStats, { recordUsage, aggregateHistory } from './stats.js';
+import { listOneDriveFiles, downloadFilesBuffers } from './onedriveClient.js';
+import { loadCache, saveCache } from './cacheManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,7 +32,7 @@ const app = express();
 app.use(express.json());
 
 // --- DECOUPAGE DU TEXTE ---
-function splitText(text, chunkSize = 1000, overlap = 200) {
+function splitText(text, chunkSize = 600, overlap = 100) {
     const chunks = [];
     let start = 0;
     while (start < text.length) {
@@ -52,19 +53,52 @@ class LocalRamVectorStore {
     async addDocuments(chunks) {
         console.log(`   ↳ Envoi de ${chunks.length} blocs à Mistral pour embedding...`);
         const batchSize = 32;
+        const delayBetweenBatches = 500; // ms entre chaque batch
+        const maxRetries = 3;
+
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
-            const response = await this.mistralClient.embeddings.create({
-                model: 'mistral-embed',
-                inputs: batch.map(c => c.text),
-            });
-            batch.forEach((chunk, j) => {
-                this.documents.push({
-                    text: chunk.text,
-                    source: chunk.source,
-                    embedding: response.data[j].embedding
-                });
-            });
+            let retries = 0;
+            let success = false;
+
+            while (!success && retries <= maxRetries) {
+                try {
+                    if (retries > 0) {
+                        const backoff = Math.pow(2, retries) * 1000; // 2s, 4s, 8s
+                        console.log(`   ⏳ Retry ${retries}/${maxRetries} dans ${backoff / 1000}s (rate limit)...`);
+                        await new Promise(r => setTimeout(r, backoff));
+                    }
+
+                    const response = await this.mistralClient.embeddings.create({
+                        model: 'mistral-embed',
+                        inputs: batch.map(c => c.text),
+                    });
+                    batch.forEach((chunk, j) => {
+                        this.documents.push({
+                            text: chunk.text,
+                            source: chunk.source,
+                            embedding: response.data[j].embedding
+                        });
+                    });
+                    // Tracker les tokens d'embedding
+                    if (response.usage) {
+                        const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
+                        recordUsage(embTk, 0, 'embedding_indexation');
+                    }
+                    success = true;
+                } catch (err) {
+                    if (err.statusCode === 429 && retries < maxRetries) {
+                        retries++;
+                    } else {
+                        throw err;
+                    }
+                }
+            }
+
+            // Délai entre les batches pour éviter le rate limit
+            if (i + batchSize < chunks.length) {
+                await new Promise(r => setTimeout(r, delayBetweenBatches));
+            }
         }
     }
 
@@ -75,6 +109,11 @@ class LocalRamVectorStore {
             model: 'mistral-embed',
             inputs: [query],
         });
+        // Tracker les tokens d'embedding de recherche
+        if (response.usage) {
+            const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
+            recordUsage(embTk, 0, 'embedding_search');
+        }
         const queryVector = response.data[0].embedding;
 
         const scores = this.documents.map(doc => {
@@ -131,44 +170,89 @@ async function initKnowledgeBase(mistralClient) {
     console.log("------------------------------------------");
     console.log("🔄 Indexation des documents en cours...");
 
-    let documents;
+    const cache = loadCache();
+    let remoteFiles;
     try {
-        documents = await fetchDocuments();
+        remoteFiles = await listOneDriveFiles();
     } catch (err) {
         console.error("❌ Erreur de connexion OneDrive:", err.message);
+        if (cache.documents.length > 0) {
+            console.log("⚠️  Utilisation du cache local de la base de connaissance.");
+            const store = new LocalRamVectorStore(mistralClient);
+            store.documents = cache.documents;
+            botStats.totalChunksIndexed = cache.documents.length;
+            botStats.totalFilesParsed = Object.keys(cache.files).length;
+            return store;
+        }
         console.log("⚠️  Le bot démarrera sans base de connaissance.");
         return null;
     }
 
-    if (!documents || documents.length === 0) {
+    if (!remoteFiles || remoteFiles.length === 0) {
         console.log("⚠️  Aucun document trouvé. Le bot fonctionnera sans base de cours.");
         return null;
     }
 
-    const store = new LocalRamVectorStore(mistralClient);
-    let allChunks = [];
+    const filesToDownload = [];
+    const currentRemotePaths = new Set();
 
-    for (const doc of documents) {
-        console.log(`📄 Traitement : ${doc.name}`);
-        try {
-            const text = await extractTextFromBuffer(doc.buffer, doc.ext);
-            if (text && text.trim().length > 0) {
-                const chunks = splitText(text, 1000, 200);
-                chunks.forEach(c => allChunks.push({ text: c, source: doc.name }));
-            } else {
-                console.log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
-            }
-        } catch (e) {
-            console.error(`   ❌ Impossible de lire ${doc.name}:`, e.message);
+    for (const file of remoteFiles) {
+        currentRemotePaths.add(file.fullPath);
+        const cachedDate = cache.files[file.fullPath];
+        if (!cachedDate || cachedDate !== file.lastModified) {
+            filesToDownload.push(file);
         }
     }
 
-    if (allChunks.length > 0) {
-        await store.addDocuments(allChunks);
-        console.log(`✅ ${allChunks.length} blocs indexés !`);
-        botStats.totalChunksIndexed += allChunks.length;
-        botStats.totalFilesParsed += documents.length;
+    const pathsToRemove = Object.keys(cache.files).filter(p => !currentRemotePaths.has(p));
+    
+    let newChunks = [];
+    if (filesToDownload.length > 0) {
+        console.log(`🔄 ${filesToDownload.length} fichier(s) à télécharger/mettre à jour.`);
+        const downloadedDocs = await downloadFilesBuffers(filesToDownload);
+        for (const doc of downloadedDocs) {
+            console.log(`📄 Traitement : ${doc.name}`);
+            try {
+                const text = await extractTextFromBuffer(doc.buffer, doc.ext);
+                if (text && text.trim().length > 0) {
+                    const chunks = splitText(text, 600, 100);
+                    chunks.forEach(c => newChunks.push({ text: c, source: doc.fullPath }));
+                } else {
+                    console.log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
+                }
+                const remoteFile = filesToDownload.find(f => f.fullPath === doc.fullPath);
+                if (remoteFile) cache.files[doc.fullPath] = remoteFile.lastModified;
+            } catch (e) {
+                console.error(`   ❌ Impossible de lire ${doc.name}:`, e.message);
+            }
+        }
+    } else {
+        console.log(`✅ Tous les fichiers sont à jour. Aucun téléchargement nécessaire.`);
     }
+
+    const store = new LocalRamVectorStore(mistralClient);
+    
+    let updatedDocuments = cache.documents.filter(doc => 
+        !pathsToRemove.includes(doc.source) && 
+        !filesToDownload.some(f => f.fullPath === doc.source)
+    );
+
+    if (newChunks.length > 0) {
+        await store.addDocuments(newChunks);
+        console.log(`✅ ${newChunks.length} blocs indexés !`);
+        updatedDocuments = updatedDocuments.concat(store.documents);
+    }
+
+    for (const p of pathsToRemove) {
+        delete cache.files[p];
+    }
+
+    store.documents = updatedDocuments;
+    cache.documents = updatedDocuments;
+    saveCache(cache);
+
+    botStats.totalChunksIndexed = updatedDocuments.length;
+    botStats.totalFilesParsed = Object.keys(cache.files).length;
 
     return store;
 }
@@ -198,10 +282,35 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// Route Statistiques
 app.get('/api/stats', (req, res) => {
     const uptimeMs = Date.now() - botStats.startTime;
-    res.json({ ...botStats, uptime: uptimeMs });
+    
+    const avgTokensSession = botStats.session.totalConversations > 0
+        ? Math.round((botStats.session.totalPromptTokens + botStats.session.totalCompletionTokens) / botStats.session.totalConversations)
+        : 0;
+        
+    const avgTokensGlobal = botStats.global.totalConversations > 0
+        ? Math.round((botStats.global.totalPromptTokens + botStats.global.totalCompletionTokens) / botStats.global.totalConversations)
+        : 0;
+        
+    res.json({ 
+        uptime: uptimeMs, 
+        totalFilesParsed: botStats.totalFilesParsed,
+        totalChunksIndexed: botStats.totalChunksIndexed,
+        session: { ...botStats.session, avgTokensPerRequest: avgTokensSession },
+        global: { ...botStats.global, avgTokensPerRequest: avgTokensGlobal }
+    });
+});
+
+// Route Historique détaillé
+app.get('/api/stats/history', (req, res) => {
+    const hourly = aggregateHistory('hour');
+    const daily = aggregateHistory('day');
+    res.json({
+        entries: botStats.history,
+        hourly,
+        daily
+    });
 });
 
 // --- ACTUALISATION AUTOMATIQUE ---

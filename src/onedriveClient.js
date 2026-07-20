@@ -47,7 +47,8 @@ async function listFilesRecursive(client, userEmail, folderPath) {
                         fullPath: `${currentPath}/${item.name}`,
                         downloadUrl: item['@microsoft.graph.downloadUrl'],
                         ext,
-                        size: item.size || 0
+                        size: item.size || 0,
+                        lastModified: item.lastModifiedDateTime
                     });
                 }
             }
@@ -64,7 +65,7 @@ async function downloadFileBuffer(downloadUrl) {
     return Buffer.from(await response.arrayBuffer());
 }
 
-export async function fetchDocuments() {
+export async function listOneDriveFiles() {
     const userEmail = process.env.ONEDRIVE_USER_EMAIL;
     const folderPath = process.env.ONEDRIVE_FOLDER_PATH;
 
@@ -78,7 +79,10 @@ export async function fetchDocuments() {
     console.log(`📂 Scan du dossier : ${folderPath}`);
     const files = await listFilesRecursive(client, userEmail, folderPath);
     console.log(`📋 ${files.length} fichier(s) compatible(s) trouvé(s)`);
+    return files;
+}
 
+export async function downloadFilesBuffers(files) {
     const documents = [];
     for (const file of files) {
         const sizeKb = Math.round(file.size / 1024);
@@ -90,6 +94,5 @@ export async function fetchDocuments() {
             console.error(`   ❌ Erreur téléchargement "${file.name}" : ${err.message}`);
         }
     }
-
     return documents;
 }

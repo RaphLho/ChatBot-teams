@@ -1,5 +1,5 @@
 import botbuilder from 'botbuilder';
-import botStats from './stats.js';
+import botStats, { recordUsage } from './stats.js';
 const { ActivityHandler } = botbuilder;
 
 // Mémoire courte : historique des conversations par utilisateur (en RAM)
@@ -70,7 +70,7 @@ class RAGBot extends ActivityHandler {
         let contextDocs = "";
         if (this.vectorStore) {
             try {
-                const results = await this.vectorStore.similaritySearch(searchContext, 3);
+                const results = await this.vectorStore.similaritySearch(searchContext, 2);
                 if (results.length > 0) {
                     contextDocs = results
                         .map((r, i) => `[Extrait ${i + 1} - Source: ${r.source}]\n${r.text}`)
@@ -87,8 +87,9 @@ Ta mission est d'aider les étudiants dans leurs cours.
 Règles :
 1. Si des extraits de cours pertinents te sont fournis, base tes explications dessus. Ne dis JAMAIS "D'après l'extrait fourni". Dis toujours "D'après le document [NOM_DU_FICHIER_SOURCE]".
 2. Si l'étudiant donne une question de suivi ("et la suite ?", "plus de détails ?"), sers-toi de la conversation précédente pour comprendre de quoi il parle.
-3. Si l'étudiant parle de choses totalement hors contexte éducatif (ex: recette de cuisine, cinéma, etc.), refuse poliment de répondre en précisant que ton but est purement éducatif.
-4. Si la réponse te manque totalement et n'est ni dans l'historique, ni dans tes connaissances éducatives générales, avoue poliment que tu ne sais pas.`;
+3. Si l'étudiant pose une question totalement hors contexte éducatif ou professionnel (ex: recette de cuisine, blague, cinéma, etc.), commence obligatoirement ta réponse par la balise exacte [NON-CONFORME] puis refuse poliment de répondre en précisant que ton but est purement éducatif.
+4. Si la réponse te manque totalement et n'est ni dans l'historique, ni dans tes connaissances éducatives générales, avoue poliment que tu ne sais pas.
+5. SOIS CONCIS. Tes réponses doivent être directes, claires et aller à l'essentiel. Ne génère pas de longs textes inutiles.`;
 
         let messages = [{ role: 'system', content: systemPrompt }];
 
@@ -114,13 +115,26 @@ Règles :
             messages: messages
         });
 
-        if (chatResponse.usage) {
-            botStats.totalPromptTokens += chatResponse.usage.prompt_tokens || 0;
-            botStats.totalCompletionTokens += chatResponse.usage.completion_tokens || 0;
-            botStats.totalConversations += 1;
+        let finalAnswer = chatResponse.choices[0].message.content;
+        let isNonCompliant = false;
+
+        // Détection de hors sujet
+        if (finalAnswer.includes('[NON-CONFORME]')) {
+            isNonCompliant = true;
+            finalAnswer = finalAnswer.replace('[NON-CONFORME]', '').trim();
         }
 
-        const finalAnswer = chatResponse.choices[0].message.content;
+        // 4.b Enregistrement des tokens
+        const usage = chatResponse.usage;
+        if (usage) {
+            const promptTk = usage.promptTokens || usage.prompt_tokens || 0;
+            const completionTk = usage.completionTokens || usage.completion_tokens || 0;
+            console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}`);
+            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant);
+        } else {
+            console.warn('⚠️ Pas de données usage dans la réponse Mistral');
+            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant);
+        }
 
         // 5. Mise en cache et historique
         responseCache.set(cacheKey, finalAnswer);
@@ -132,9 +146,13 @@ Règles :
     _updateHistory(userId, question, answer) {
         if (!userHistory.has(userId)) userHistory.set(userId, []);
         const history = userHistory.get(userId);
-        history.push({ question, answer });
-        // Garder les 5 derniers tours de conversation complets
-        if (history.length > 5) history.shift();
+        
+        // Troncature de la réponse pour économiser des tokens dans le futur
+        const truncatedAnswer = answer.length > 300 ? answer.substring(0, 300) + "... [Texte tronqué]" : answer;
+        
+        history.push({ question, answer: truncatedAnswer });
+        // Garder uniquement les 2 derniers tours de conversation
+        if (history.length > 2) history.shift();
     }
 }
 
