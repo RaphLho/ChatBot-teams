@@ -262,6 +262,31 @@ const PORT = process.env.PORT || 3978;
 
 app.use(express.static(path.join(__dirname, '../public')));
 
+// --- MIDDLEWARE AUTH STATS ---
+function basicAuthStats(req, res, next) {
+    const authheader = req.headers.authorization;
+    if (!authheader) {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Statistiques"');
+        return res.status(401).send('Authentification requise');
+    }
+    const auth = Buffer.from(authheader.split(' ')[1], 'base64').toString().split(':');
+    const user = auth[0];
+    const pass = auth[1];
+
+    if (user === process.env.ID_STATS && pass === process.env.MDP_STATS) {
+        next();
+    } else {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Statistiques"');
+        return res.status(401).send('Identifiants incorrects');
+    }
+}
+
+// Route HTML pour les stats
+app.get('/stats', basicAuthStats, (req, res) => {
+    res.sendFile(path.join(__dirname, '../protected/stats.html'));
+});
+
+
 // Point d'entrée pour Microsoft Teams / Bot Framework
 app.post('/api/messages', async (req, res) => {
     if (!bot_instance) return res.status(503).send("Bot en cours d'initialisation...");
@@ -282,7 +307,7 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', basicAuthStats, (req, res) => {
     const uptimeMs = Date.now() - botStats.startTime;
     
     const avgTokensSession = botStats.session.totalConversations > 0
@@ -303,7 +328,7 @@ app.get('/api/stats', (req, res) => {
 });
 
 // Route Historique détaillé
-app.get('/api/stats/history', (req, res) => {
+app.get('/api/stats/history', basicAuthStats, (req, res) => {
     const hourly = aggregateHistory('hour');
     const daily = aggregateHistory('day');
     res.json({

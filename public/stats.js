@@ -1,32 +1,7 @@
 // ============================================
-// Tab Navigation
+// Auto Refresh
 // ============================================
-const navTabs = document.querySelectorAll('.nav-tab');
-const chatPage = document.getElementById('chat-page');
-const statsPage = document.getElementById('stats-page');
-
 let statsRefreshInterval = null;
-
-navTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const target = tab.dataset.tab;
-
-        // Update active tab
-        navTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        if (target === 'chat') {
-            chatPage.style.display = 'flex';
-            statsPage.style.display = 'none';
-            stopAutoRefresh();
-        } else if (target === 'stats') {
-            chatPage.style.display = 'none';
-            statsPage.style.display = 'flex';
-            loadStats();
-            startAutoRefresh();
-        }
-    });
-});
 
 function startAutoRefresh() {
     if (statsRefreshInterval) return;
@@ -39,6 +14,13 @@ function stopAutoRefresh() {
         statsRefreshInterval = null;
     }
 }
+
+// Load automatically on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    startAutoRefresh();
+});
+
 
 // ============================================
 // Chart.js Instances
