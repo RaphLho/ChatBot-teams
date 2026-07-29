@@ -144,6 +144,45 @@ messageInput.addEventListener('keydown', (e) => {
     }
 });
 
+// Affiche l'onglet Statistiques si une session admin est active, sinon un bouton Connexion
+async function renderStatsNavSlot() {
+    const slot = document.getElementById('nav-stats-slot');
+    if (!slot) return;
+
+    let authenticated = false;
+    try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        authenticated = !!data.authenticated;
+    } catch (err) {
+        authenticated = false;
+    }
+
+    if (authenticated) {
+        slot.innerHTML = `
+            <a href="/stats" target="_blank" class="nav-tab" id="nav-stats" style="text-decoration: none; color: inherit;">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 20V10"/>
+                    <path d="M12 20V4"/>
+                    <path d="M6 20v-6"/>
+                </svg>
+                Statistiques
+            </a>`;
+    } else {
+        slot.innerHTML = `
+            <a href="/login" class="nav-tab" id="nav-login" style="text-decoration: none; color: inherit;">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                    <polyline points="10 17 15 12 10 7"/>
+                    <line x1="15" y1="12" x2="3" y2="12"/>
+                </svg>
+                Connexion
+            </a>`;
+    }
+}
+
+renderStatsNavSlot();
+
 // New Chat Button
 newChatBtn.addEventListener('click', () => {
     // Generate new ID to get fresh conversation context without memory from previous one

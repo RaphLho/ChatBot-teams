@@ -11,6 +11,10 @@ let globalStats = {
     totalConversations: 0,
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
+    totalNonCompliant: 0,
+    totalResponseTimeMs: 0,
+    totalTimedRequests: 0,
+    uniqueUserIds: [],
     monthlyUsage: {},
     firstLaunchDate: Date.now()
 };
@@ -22,9 +26,22 @@ if (fs.existsSync(STATS_FILE)) {
         if (!globalStats.firstLaunchDate) {
             globalStats.firstLaunchDate = Date.now();
         }
+        if (!Array.isArray(globalStats.uniqueUserIds)) globalStats.uniqueUserIds = [];
+        if (!globalStats.totalNonCompliant) globalStats.totalNonCompliant = 0;
+        if (!globalStats.totalResponseTimeMs) globalStats.totalResponseTimeMs = 0;
+        if (!globalStats.totalTimedRequests) globalStats.totalTimedRequests = 0;
     } catch (e) {
         console.error("Erreur lors de la lecture des statistiques globales :", e);
     }
+}
+
+// Ensemble en mémoire pour un lookup O(1) des utilisateurs déjà vus (persisté via globalStats.uniqueUserIds)
+const globalUniqueUserSet = new Set(globalStats.uniqueUserIds);
+// Ensemble propre à la session en cours (remis à zéro à chaque redémarrage du serveur)
+const sessionUniqueUserSet = new Set();
+
+function isRealUser(userId) {
+    return !!userId && !userId.startsWith('embedding_');
 }
 
 function saveGlobalStats() {
@@ -42,18 +59,24 @@ function saveGlobalStats() {
 // --- Statistiques de Session (En Mémoire) ---
 const botStats = {
     startTime: Date.now(),
-    
+
     session: {
         totalConversations: 0,
         totalPromptTokens: 0,
         totalCompletionTokens: 0,
+        totalNonCompliant: 0,
+        totalResponseTimeMs: 0,
+        totalTimedRequests: 0,
     },
-    
+
     global: globalStats,
-    
+
     totalFilesParsed: 0,
     totalChunksIndexed: 0,
-    
+
+    // Nombre de réponses servies depuis le cache RAM (aucun appel API Mistral effectué)
+    cacheHits: 0,
+
     history: []
 };
 
@@ -67,11 +90,13 @@ const MAX_HISTORY = 1000;
  * @param {string} question - Question de l'utilisateur
  * @param {string} answer - Réponse du bot
  * @param {boolean} isNonCompliant - Vrai si la requête était hors sujet
+ * @param {number|null} responseTimeMs - Temps de génération de la réponse par Mistral (ms), null si non mesuré
  */
-function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false) {
+function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null) {
     const pTokens = promptTokens || 0;
     const cTokens = completionTokens || 0;
     const totalTk = pTokens + cTokens;
+    const hasTiming = typeof responseTimeMs === 'number' && responseTimeMs >= 0;
 
     // 1. Mise à jour de l'historique de session
     const entry = {
@@ -82,7 +107,8 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
         userId,
         question,
         answer,
-        isNonCompliant
+        isNonCompliant,
+        responseTimeMs: hasTiming ? responseTimeMs : null
     };
 
     botStats.history.push(entry);
@@ -94,23 +120,96 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
     botStats.session.totalPromptTokens += pTokens;
     botStats.session.totalCompletionTokens += cTokens;
     botStats.session.totalConversations += 1;
+    if (isNonCompliant) botStats.session.totalNonCompliant += 1;
+    if (hasTiming) {
+        botStats.session.totalResponseTimeMs += responseTimeMs;
+        botStats.session.totalTimedRequests += 1;
+    }
+    if (isRealUser(userId)) sessionUniqueUserSet.add(userId);
 
     // 3. Mise à jour des statistiques globales
     globalStats.totalPromptTokens += pTokens;
     globalStats.totalCompletionTokens += cTokens;
     globalStats.totalConversations += 1;
+    if (isNonCompliant) globalStats.totalNonCompliant += 1;
+    if (hasTiming) {
+        globalStats.totalResponseTimeMs += responseTimeMs;
+        globalStats.totalTimedRequests += 1;
+    }
+    if (isRealUser(userId) && !globalUniqueUserSet.has(userId)) {
+        globalUniqueUserSet.add(userId);
+        globalStats.uniqueUserIds.push(userId);
+    }
 
     // 4. Statistiques mensuelles
     const date = new Date();
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    
+
     if (!globalStats.monthlyUsage) globalStats.monthlyUsage = {};
     if (!globalStats.monthlyUsage[monthKey]) globalStats.monthlyUsage[monthKey] = 0;
-    
+
     globalStats.monthlyUsage[monthKey] += totalTk;
 
     // Sauvegarde sur disque
     saveGlobalStats();
+}
+
+/**
+ * Nombre d'utilisateurs distincts ayant posé une question depuis le démarrage du serveur.
+ */
+function getSessionUniqueUsersCount() {
+    return sessionUniqueUserSet.size;
+}
+
+/**
+ * Agrège l'historique de session par heure de la journée (0-23), toutes dates confondues.
+ * Permet de visualiser les créneaux horaires les plus actifs.
+ */
+function aggregateByHourOfDay() {
+    const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: `${String(h).padStart(2, '0')}h`, totalTokens: 0, requests: 0 }));
+    for (const entry of botStats.history) {
+        const h = new Date(entry.timestamp).getHours();
+        buckets[h].totalTokens += entry.totalTokens;
+        buckets[h].requests += 1;
+    }
+    return buckets;
+}
+
+/**
+ * Agrège l'historique de session par jour de la semaine (Lundi -> Dimanche).
+ */
+function aggregateByWeekday() {
+    const labels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+    const buckets = labels.map(label => ({ label, totalTokens: 0, requests: 0 }));
+    for (const entry of botStats.history) {
+        const jsDay = new Date(entry.timestamp).getDay(); // 0 = Dimanche ... 6 = Samedi
+        const idx = jsDay === 0 ? 6 : jsDay - 1;
+        buckets[idx].totalTokens += entry.totalTokens;
+        buckets[idx].requests += 1;
+    }
+    return buckets;
+}
+
+/**
+ * Classe les utilisateurs de la session par consommation de tokens décroissante.
+ * Les appels d'indexation/embedding (userId préfixé "embedding_") sont exclus.
+ * @param {number} limit
+ */
+function getTopUsers(limit = 10) {
+    const map = new Map();
+    for (const entry of botStats.history) {
+        if (!isRealUser(entry.userId)) continue;
+        if (!map.has(entry.userId)) {
+            map.set(entry.userId, { userId: entry.userId, totalTokens: 0, requests: 0, nonCompliant: 0 });
+        }
+        const u = map.get(entry.userId);
+        u.totalTokens += entry.totalTokens;
+        u.requests += 1;
+        if (entry.isNonCompliant) u.nonCompliant += 1;
+    }
+    return Array.from(map.values())
+        .sort((a, b) => b.totalTokens - a.totalTokens)
+        .slice(0, limit);
 }
 
 /**
@@ -145,4 +244,4 @@ function aggregateHistory(interval = 'hour') {
 }
 
 export default botStats;
-export { recordUsage, aggregateHistory };
+export { recordUsage, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount };

@@ -40,6 +40,8 @@
             <div class="sidebar-content">
                 <p class="sidebar-desc">Statistiques d'utilisation et consommation des requêtes au modèle.</p>
             </div>
+
+            <a href="/logout" class="secondary-btn" style="text-decoration: none; text-align: center; display: block;">Déconnexion</a>
         </aside>
 
         <!-- Stats Page -->
@@ -49,20 +51,27 @@
                 <div class="stats-header-actions">
                     <span class="auto-refresh-badge" id="refresh-indicator">
                         <span class="refresh-pulse"></span>
-                        Actualisation auto
+                        Actualisation auto (30s)
                     </span>
                 </div>
             </header>
 
             <div class="stats-scroll-area">
-                <!-- KPI Cards -->
+
+                <!-- ============================================ -->
+                <!-- Vue d'ensemble                                -->
+                <!-- ============================================ -->
+                <div class="section-title">Vue d'ensemble</div>
                 <div class="kpi-grid">
                     <div class="kpi-card kpi-total">
                         <div class="kpi-icon">
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                         </div>
                         <div class="kpi-content">
-                            <span class="kpi-label">Total global</span>
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Total global</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Somme de tous les tokens (prompt + complétion) échangés avec Mistral depuis le tout premier lancement du bot, tous utilisateurs et toutes sessions confondus. C'est le cumul historique complet.">i</span>
+                            </div>
                             <span class="kpi-value" id="kpi-total-global">0</span>
                         </div>
                     </div>
@@ -71,7 +80,10 @@
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         </div>
                         <div class="kpi-content">
-                            <span class="kpi-label">Mois en cours</span>
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Mois en cours</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Tokens consommés depuis le 1er jour du mois calendaire en cours (réinitialisé automatiquement chaque mois). Utile pour suivre la consommation mensuelle.">i</span>
+                            </div>
                             <span class="kpi-value" id="kpi-total-month">0</span>
                         </div>
                     </div>
@@ -80,7 +92,10 @@
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                         </div>
                         <div class="kpi-content">
-                            <span class="kpi-label">Session actuelle</span>
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Session actuelle</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Tokens consommés depuis le dernier redémarrage du serveur. Remise à zéro à chaque redéploiement, contrairement au total global qui est sauvegardé sur disque.">i</span>
+                            </div>
                             <span class="kpi-value" id="kpi-total-session">0</span>
                         </div>
                     </div>
@@ -89,7 +104,10 @@
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                         </div>
                         <div class="kpi-content">
-                            <span class="kpi-label">Requêtes (global)</span>
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Requêtes (global)</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Nombre total de requêtes traitées par le bot depuis le premier lancement (questions des utilisateurs + tâches internes d'indexation des documents).">i</span>
+                            </div>
                             <span class="kpi-value" id="kpi-requests">0</span>
                         </div>
                     </div>
@@ -98,13 +116,69 @@
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
                         </div>
                         <div class="kpi-content">
-                            <span class="kpi-label">Coût total (estimé)</span>
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Coût total (estimé)</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Estimation approximative basée sur des tarifs Mistral moyens : ~0,15 €/1M tokens de prompt (moyenne embeddings + prompts) et ~0,60 €/1M tokens de complétion. Ordre de grandeur, pas une facture exacte.">i</span>
+                            </div>
                             <span class="kpi-value" id="kpi-total-cost">0 €</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-users">
+                        <div class="kpi-icon">
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </div>
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Utilisateurs uniques</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Nombre de personnes distinctes (identifiant Teams ou web) ayant posé au moins une question depuis le premier lancement du bot.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-unique-users">0</span>
+                            <span class="kpi-sublabel" id="kpi-unique-users-session">0 sur cette session</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-noncompliant">
+                        <div class="kpi-icon">
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </div>
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Requêtes hors-sujet</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Part des questions détectées comme hors du cadre pédagogique (ex : recettes, blagues, cinéma...) et refusées poliment par le bot. Détectée via la balise interne [NON-CONFORME]. Un taux élevé peut signaler un usage détourné.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-noncompliant-rate">0%</span>
+                            <span class="kpi-sublabel" id="kpi-noncompliant-count">0 requête(s)</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-speed">
+                        <div class="kpi-icon">
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        </div>
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Temps de réponse moyen</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Durée moyenne prise par Mistral pour générer une réponse, mesurée entre l'envoi de la requête et la réception complète de la réponse. N'inclut pas les réponses servies depuis le cache (instantanées).">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-response-time">0 s</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-cache">
+                        <div class="kpi-icon">
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                        </div>
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Cache hits (session)</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Nombre de réponses renvoyées instantanément depuis le cache mémoire du bot (question déjà posée durant cette session), sans nouvel appel à l'API Mistral. Chaque cache hit économise des tokens et du temps.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-cache-hits">0</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Charts Grid -->
+                <!-- ============================================ -->
+                <!-- Répartition dans le temps                     -->
+                <!-- ============================================ -->
+                <div class="section-title">Consommation dans le temps</div>
                 <div class="charts-grid">
                     <div class="chart-card chart-card-wide">
                         <div class="chart-card-header">
@@ -114,6 +188,7 @@
                                 <button class="chart-toggle-btn" data-range="daily">Par jour</button>
                             </div>
                         </div>
+                        <p class="chart-card-desc">Évolution des tokens de prompt, de complétion et du total consommé au fil du temps (session en cours). Permet de repérer les pics d'usage.</p>
                         <div class="chart-wrapper">
                             <canvas id="chart-timeline"></canvas>
                         </div>
@@ -122,6 +197,7 @@
                         <div class="chart-card-header">
                             <h3>Prompt vs Completion</h3>
                         </div>
+                        <p class="chart-card-desc">Comparaison, période par période, entre les tokens envoyés au modèle (prompt) et ceux qu'il a générés en réponse (complétion).</p>
                         <div class="chart-wrapper chart-wrapper-square">
                             <canvas id="chart-bar"></canvas>
                         </div>
@@ -130,32 +206,143 @@
                         <div class="chart-card-header">
                             <h3>Répartition globale</h3>
                         </div>
+                        <p class="chart-card-desc">Part respective des tokens de prompt et de complétion dans le cumul global depuis le premier lancement.</p>
                         <div class="chart-wrapper chart-wrapper-square">
                             <canvas id="chart-doughnut"></canvas>
                         </div>
                     </div>
                 </div>
 
-                <!-- History Table -->
+                <!-- ============================================ -->
+                <!-- Utilisation & qualité                         -->
+                <!-- ============================================ -->
+                <div class="section-title">Utilisation &amp; qualité des requêtes</div>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Top 10 utilisateurs</h3>
+                        </div>
+                        <p class="chart-card-desc">Les utilisateurs ayant consommé le plus de tokens durant la session en cours (les appels d'indexation des documents ne sont pas comptés ici).</p>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-top-users"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Conformité des requêtes</h3>
+                        </div>
+                        <p class="chart-card-desc">Proportion de questions conformes au cadre pédagogique par rapport aux questions hors-sujet refusées par le bot (session en cours).</p>
+                        <div class="chart-wrapper chart-wrapper-square">
+                            <canvas id="chart-compliance"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Répartition par heure de la journée</h3>
+                        </div>
+                        <p class="chart-card-desc">Nombre de requêtes reçues selon l'heure (0-23h), toutes dates confondues (session en cours). Identifie les créneaux les plus actifs.</p>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-hour-of-day"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Répartition par jour de la semaine</h3>
+                        </div>
+                        <p class="chart-card-desc">Nombre de requêtes reçues selon le jour de la semaine (session en cours).</p>
+                        <div class="chart-wrapper">
+                            <canvas id="chart-weekday"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================ -->
+                <!-- Glossaire                                     -->
+                <!-- ============================================ -->
+                <div class="glossary-card open" id="glossary-card">
+                    <button class="glossary-toggle" id="glossary-toggle" type="button" aria-expanded="true">
+                        <div class="glossary-toggle-left">
+                            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            <div>
+                                <h3>Glossaire — à quoi correspond chaque indicateur ?</h3>
+                                <p>Cliquez pour replier / déplier les explications détaillées</p>
+                            </div>
+                        </div>
+                        <svg class="glossary-chevron" viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <dl class="glossary-body">
+                        <div class="glossary-item">
+                            <dt>Token</dt>
+                            <dd>Unité de découpage du texte utilisée par les modèles de langage (environ 3/4 de mot en moyenne, un peu moins pour le français). Chaque question posée et chaque réponse générée consomment des tokens, qui sont facturés par Mistral.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Tokens de prompt</dt>
+                            <dd>Tokens envoyés AU modèle : la question de l'étudiant, l'historique de conversation récent et les extraits de cours injectés pour le contexte (RAG).</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Tokens de complétion</dt>
+                            <dd>Tokens générés PAR le modèle pour produire sa réponse. Généralement plus coûteux par token que les tokens de prompt.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Session vs Global</dt>
+                            <dd><strong>Session</strong> = depuis le dernier redémarrage du serveur (remise à zéro à chaque redéploiement). <strong>Global</strong> = cumul depuis le tout premier lancement du bot, sauvegardé sur disque et jamais réinitialisé.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Coût estimé</dt>
+                            <dd>Calculé avec des tarifs Mistral approximatifs (~0,15 €/1M tokens de prompt, ~0,60 €/1M tokens de complétion). C'est un ordre de grandeur indicatif, pas une facture exacte.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Requête hors-sujet ([NON-CONFORME])</dt>
+                            <dd>Le bot est instruit de préfixer sa réponse par la balise interne [NON-CONFORME] lorsque la question sort totalement du cadre pédagogique. Cette balise est retirée avant affichage mais comptabilisée dans les statistiques.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Cache RAM</dt>
+                            <dd>Le bot mémorise en mémoire les réponses déjà données durant la session. Si la question exacte revient, la réponse est renvoyée instantanément sans nouvel appel à l'API Mistral (0 token consommé).</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Blocs vectoriels (chunks)</dt>
+                            <dd>Les documents de la base de connaissance sont découpés en blocs d'environ 600 caractères, puis transformés en vecteurs numériques (embeddings) pour permettre la recherche sémantique.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Recherche vectorielle (RAG)</dt>
+                            <dd>Pour chaque question, le bot recherche les blocs de cours les plus proches sémantiquement afin de baser sa réponse sur des documents réels plutôt que sur ses seules connaissances générales.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Utilisateur unique</dt>
+                            <dd>Identifiant (Teams ou web) distinct ayant posé au moins une question. Les appels internes d'indexation ne sont pas comptés comme des utilisateurs.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Temps de réponse</dt>
+                            <dd>Durée entre l'envoi de la requête à Mistral et la réception complète de la réponse. Dépend de la longueur de la réponse et de la charge du service Mistral.</dd>
+                        </div>
+                    </dl>
+                </div>
+
+                <!-- ============================================ -->
+                <!-- History Table                                 -->
+                <!-- ============================================ -->
                 <div class="history-card">
                     <div class="chart-card-header">
                         <h3>Historique des requêtes</h3>
                         <span class="history-count" id="history-count">0 entrées</span>
                     </div>
+                    <p class="chart-card-desc">Détail des 50 dernières requêtes de la session (les plus récentes en premier). Cliquez sur une ligne pour voir la question et la réponse complètes.</p>
                     <div class="table-wrapper">
                         <table class="history-table" id="history-table">
                             <thead>
                                 <tr>
-                                    <th>Date & Heure</th>
+                                    <th>Date &amp; Heure</th>
                                     <th>Utilisateur</th>
                                     <th>Prompt</th>
                                     <th>Completion</th>
                                     <th>Total</th>
+                                    <th>Temps</th>
+                                    <th>Statut</th>
                                 </tr>
                             </thead>
                             <tbody id="history-tbody">
                                 <tr class="empty-row">
-                                    <td colspan="5">Aucune donnée disponible</td>
+                                    <td colspan="7">Aucune donnée disponible</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -167,7 +354,7 @@
                     <span>⏱️ Uptime : <strong id="uptime-display">--</strong></span>
                     <span>📄 Fichiers indexés : <strong id="files-parsed">0</strong></span>
                     <span>🧩 Blocs vectoriels : <strong id="chunks-indexed">0</strong></span>
-                    <span>📊 Moy. tokens/requête : <strong id="avg-tokens">0</strong></span>
+                    <span>📊 Moy. tokens/requête (global) : <strong id="avg-tokens">0</strong></span>
                 </div>
             </div>
         </main>

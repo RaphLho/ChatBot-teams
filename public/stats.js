@@ -28,6 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
 let timelineChart = null;
 let barChart = null;
 let doughnutChart = null;
+let topUsersChart = null;
+let complianceChart = null;
+let hourOfDayChart = null;
+let weekdayChart = null;
 
 const chartColors = {
     violet: 'rgba(139, 92, 246, 1)',
@@ -38,6 +42,12 @@ const chartColors = {
     emeraldBg: 'rgba(16, 185, 129, 0.15)',
     amber: 'rgba(245, 158, 11, 1)',
     amberBg: 'rgba(245, 158, 11, 0.15)',
+    rose: 'rgba(244, 63, 94, 1)',
+    roseBg: 'rgba(244, 63, 94, 0.15)',
+    cyan: 'rgba(6, 182, 212, 1)',
+    cyanBg: 'rgba(6, 182, 212, 0.15)',
+    indigo: 'rgba(99, 102, 241, 1)',
+    indigoBg: 'rgba(99, 102, 241, 0.15)',
 };
 
 const commonChartOptions = {
@@ -241,6 +251,180 @@ function initDoughnutChart(promptTotal, completionTotal) {
 }
 
 // ============================================
+// Top Users Chart (Horizontal Bar)
+// ============================================
+function initTopUsersChart(topUsers) {
+    const ctx = document.getElementById('chart-top-users').getContext('2d');
+
+    if (topUsersChart) topUsersChart.destroy();
+
+    const data = topUsers && topUsers.length > 0 ? topUsers : [];
+    const labels = data.map(u => truncateUserId(u.userId));
+
+    topUsersChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Tokens consommés',
+                data: data.map(u => u.totalTokens),
+                backgroundColor: chartColors.indigo,
+                borderRadius: 6,
+                borderSkipped: false,
+                barPercentage: 0.7,
+            }]
+        },
+        options: {
+            ...commonChartOptions,
+            indexAxis: 'y',
+            plugins: {
+                ...commonChartOptions.plugins,
+                legend: { display: false },
+                tooltip: {
+                    ...commonChartOptions.plugins.tooltip,
+                    callbacks: {
+                        title: (items) => data[items[0].dataIndex] ? data[items[0].dataIndex].userId : '',
+                        afterLabel: (item) => {
+                            const u = data[item.dataIndex];
+                            return u ? `${u.requests} requête(s) — ${u.nonCompliant} hors-sujet` : '';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(0,0,0,0.04)' },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#71717a' },
+                    border: { display: false },
+                    beginAtZero: true,
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#71717a' },
+                    border: { display: false },
+                }
+            }
+        }
+    });
+}
+
+// ============================================
+// Compliance Chart (Doughnut)
+// ============================================
+function initComplianceChart(compliant, nonCompliant) {
+    const ctx = document.getElementById('chart-compliance').getContext('2d');
+
+    if (complianceChart) complianceChart.destroy();
+
+    complianceChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Conformes', 'Hors-sujet'],
+            datasets: [{
+                data: [compliant, nonCompliant],
+                backgroundColor: [chartColors.emerald, chartColors.rose],
+                borderColor: ['white', 'white'],
+                borderWidth: 3,
+                hoverOffset: 8,
+            }]
+        },
+        options: {
+            ...commonChartOptions,
+            cutout: '65%',
+            plugins: {
+                ...commonChartOptions.plugins,
+                legend: {
+                    ...commonChartOptions.plugins.legend,
+                    position: 'bottom',
+                }
+            }
+        }
+    });
+}
+
+// ============================================
+// Hour of Day Chart (Bar)
+// ============================================
+function initHourOfDayChart(data) {
+    const ctx = document.getElementById('chart-hour-of-day').getContext('2d');
+
+    if (hourOfDayChart) hourOfDayChart.destroy();
+
+    hourOfDayChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => d.label),
+            datasets: [{
+                label: 'Requêtes',
+                data: data.map(d => d.requests),
+                backgroundColor: chartColors.cyan,
+                borderRadius: 6,
+                borderSkipped: false,
+                barPercentage: 0.75,
+            }]
+        },
+        options: {
+            ...commonChartOptions,
+            plugins: { ...commonChartOptions.plugins, legend: { display: false } },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 10 }, color: '#71717a', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+                    border: { display: false }
+                },
+                y: {
+                    grid: { color: 'rgba(0,0,0,0.04)' },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#71717a', precision: 0 },
+                    border: { display: false },
+                    beginAtZero: true,
+                }
+            }
+        }
+    });
+}
+
+// ============================================
+// Weekday Chart (Bar)
+// ============================================
+function initWeekdayChart(data) {
+    const ctx = document.getElementById('chart-weekday').getContext('2d');
+
+    if (weekdayChart) weekdayChart.destroy();
+
+    weekdayChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => d.label),
+            datasets: [{
+                label: 'Requêtes',
+                data: data.map(d => d.requests),
+                backgroundColor: chartColors.violet,
+                borderRadius: 6,
+                borderSkipped: false,
+                barPercentage: 0.6,
+            }]
+        },
+        options: {
+            ...commonChartOptions,
+            plugins: { ...commonChartOptions.plugins, legend: { display: false } },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#71717a' },
+                    border: { display: false }
+                },
+                y: {
+                    grid: { color: 'rgba(0,0,0,0.04)' },
+                    ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#71717a', precision: 0 },
+                    border: { display: false },
+                    beginAtZero: true,
+                }
+            }
+        }
+    });
+}
+
+// ============================================
 // Number Formatting
 // ============================================
 function formatNumber(n) {
@@ -259,6 +443,21 @@ function formatUptime(ms) {
     if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
+}
+
+function formatResponseTime(ms) {
+    if (!ms || ms <= 0) return '0 s';
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function formatPercent(ratio) {
+    return `${Math.round((ratio || 0) * 1000) / 10}%`;
+}
+
+function truncateUserId(userId) {
+    if (!userId) return 'inconnu';
+    return userId.length > 22 ? userId.slice(0, 22) + '…' : userId;
 }
 
 function formatTimestamp(ts) {
@@ -318,6 +517,17 @@ async function loadStats() {
 
         document.getElementById('kpi-total-cost').textContent = `~${Math.max(0.01, totalCost).toFixed(2)} €`;
 
+        // KPIs qualité & utilisation
+        document.getElementById('kpi-unique-users').textContent = formatNumber(stats.global.uniqueUsers || 0);
+        document.getElementById('kpi-unique-users-session').textContent = `${formatNumber(stats.session.uniqueUsers || 0)} sur cette session`;
+
+        document.getElementById('kpi-noncompliant-rate').textContent = formatPercent(stats.global.nonCompliantRate);
+        document.getElementById('kpi-noncompliant-count').textContent = `${formatNumber(stats.global.totalNonCompliant || 0)} requête(s)`;
+
+        document.getElementById('kpi-response-time').textContent = formatResponseTime(stats.global.avgResponseTimeMs);
+
+        document.getElementById('kpi-cache-hits').textContent = formatNumber(stats.cacheHits || 0);
+
         // Uptime bar
         document.getElementById('uptime-display').textContent = formatUptime(stats.uptime);
         document.getElementById('files-parsed').textContent = stats.totalFilesParsed;
@@ -338,6 +548,15 @@ async function loadStats() {
 
         initDoughnutChart(stats.global.totalPromptTokens || 0, stats.global.totalCompletionTokens || 0);
 
+        // Nouveaux graphiques : utilisation & qualité
+        initTopUsersChart(history.topUsers || []);
+
+        const compliantCount = Math.max(0, (stats.session.totalConversations || 0) - (stats.session.totalNonCompliant || 0));
+        initComplianceChart(compliantCount, stats.session.totalNonCompliant || 0);
+
+        initHourOfDayChart(history.hourOfDay || []);
+        initWeekdayChart(history.weekday || []);
+
         // History table
         updateHistoryTable(history.entries || []);
 
@@ -356,7 +575,7 @@ function updateHistoryTable(entries) {
     countEl.textContent = `${entries.length} entrée${entries.length > 1 ? 's' : ''}`;
 
     if (entries.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Aucune donnée disponible</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucune donnée disponible</td></tr>';
         return;
     }
 
@@ -364,14 +583,18 @@ function updateHistoryTable(entries) {
     const recent = [...entries].reverse().slice(0, 50);
 
     tbody.innerHTML = recent.map(entry => `
-        <tr class="history-row ${entry.isNonCompliant ? 'row-error' : ''}" 
-            data-question="${encodeURIComponent(entry.question || 'Pas de question (Indexation ou erreur)')}" 
+        <tr class="history-row ${entry.isNonCompliant ? 'row-error' : ''}"
+            data-question="${encodeURIComponent(entry.question || 'Pas de question (Indexation ou erreur)')}"
             data-answer="${encodeURIComponent(entry.answer || 'Pas de réponse')}">
             <td>${formatTimestamp(entry.timestamp)}</td>
             <td><span class="user-badge">${entry.userId || 'inconnu'}</span></td>
             <td><span class="token-badge prompt">${formatNumber(entry.promptTokens)}</span></td>
             <td><span class="token-badge completion">${formatNumber(entry.completionTokens)}</span></td>
             <td><span class="token-badge total">${formatNumber(entry.totalTokens)}</span></td>
+            <td>${entry.responseTimeMs ? `<span class="speed-badge">${formatResponseTime(entry.responseTimeMs)}</span>` : '—'}</td>
+            <td>${entry.isNonCompliant
+                ? '<span class="status-badge warn">⚠ Hors-sujet</span>'
+                : '<span class="status-badge ok">✓ Conforme</span>'}</td>
         </tr>
     `).join('');
 
@@ -411,6 +634,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target === modal) {
                 modal.style.display = 'none';
             }
+        });
+    }
+});
+
+// ============================================
+// Glossary Toggle
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    const glossaryToggle = document.getElementById('glossary-toggle');
+    const glossaryCard = document.getElementById('glossary-card');
+
+    if (glossaryToggle && glossaryCard) {
+        glossaryToggle.addEventListener('click', () => {
+            const isOpen = glossaryCard.classList.toggle('open');
+            glossaryToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
     }
 });

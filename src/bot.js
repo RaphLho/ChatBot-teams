@@ -53,6 +53,7 @@ class RAGBot extends ActivityHandler {
         const cacheKey = userQuestion.toLowerCase().replace(/\s+/g, '_');
         if (responseCache.has(cacheKey)) {
             const cached = responseCache.get(cacheKey);
+            botStats.cacheHits += 1;
             this._updateHistory(userId, userQuestion, cached);
             return cached;
         }
@@ -110,10 +111,12 @@ Règles :
         messages.push({ role: 'user', content: userPrompt });
 
         // 4. Appel à Mistral
+        const requestStartTime = Date.now();
         const chatResponse = await this.mistralClient.chat.complete({
             model: 'mistral-small-latest',
             messages: messages
         });
+        const responseTimeMs = Date.now() - requestStartTime;
 
         let finalAnswer = chatResponse.choices[0].message.content;
         let isNonCompliant = false;
@@ -130,10 +133,10 @@ Règles :
             const promptTk = usage.promptTokens || usage.prompt_tokens || 0;
             const completionTk = usage.completionTokens || usage.completion_tokens || 0;
             console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}`);
-            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant);
+            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs);
         } else {
             console.warn('⚠️ Pas de données usage dans la réponse Mistral');
-            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant);
+            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs);
         }
 
         // 5. Mise en cache et historique

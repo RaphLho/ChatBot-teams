@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import session from 'express-session';
 import { BotFrameworkAdapter } from 'botbuilder';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -10,7 +11,7 @@ const mammoth = require('mammoth');
 const xlsx = require('xlsx');
 import { Mistral } from '@mistralai/mistralai';
 import RAGBot from './bot.js';
-import botStats, { recordUsage, aggregateHistory } from './stats.js';
+import botStats, { recordUsage, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount } from './stats.js';
 import { listOneDriveFiles, downloadFilesBuffers } from './onedriveClient.js';
 import { loadCache, saveCache } from './cacheManager.js';
 
@@ -30,6 +31,16 @@ adapter.onTurnError = async (context, error) => {
 
 const app = express();
 app.use(express.json());
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        maxAge: 4 * 60 * 60 * 1000, // 4 heures
+        httpOnly: true,
+        sameSite: 'lax',
+    },
+}));
 
 // --- DECOUPAGE DU TEXTE ---
 function splitText(text, chunkSize = 600, overlap = 100) {
@@ -262,27 +273,57 @@ const PORT = process.env.PORT || 3978;
 
 app.use(express.static(path.join(__dirname, '../public')));
 
-// --- MIDDLEWARE AUTH STATS ---
-function basicAuthStats(req, res, next) {
-    const authheader = req.headers.authorization;
-    if (!authheader) {
-        res.setHeader('WWW-Authenticate', 'Basic realm="Statistiques"');
-        return res.status(401).send('Authentification requise');
+// --- MIDDLEWARE AUTH STATS (session) ---
+function requireStatsAuthPage(req, res, next) {
+    if (req.session && req.session.authenticated) {
+        return next();
     }
-    const auth = Buffer.from(authheader.split(' ')[1], 'base64').toString().split(':');
-    const user = auth[0];
-    const pass = auth[1];
-
-    if (user === process.env.ID_STATS && pass === process.env.MDP_STATS) {
-        next();
-    } else {
-        res.setHeader('WWW-Authenticate', 'Basic realm="Statistiques"');
-        return res.status(401).send('Identifiants incorrects');
-    }
+    return res.redirect('/login');
 }
 
+function requireStatsAuthApi(req, res, next) {
+    if (req.session && req.session.authenticated) {
+        return next();
+    }
+    return res.status(401).json({ error: 'Authentification requise' });
+}
+
+// Statut d'authentification (utilisé par la page d'accueil pour afficher l'onglet Stats ou le bouton Connexion)
+app.get('/api/auth/status', (req, res) => {
+    res.json({ authenticated: !!(req.session && req.session.authenticated) });
+});
+
+// Route de connexion
+app.get('/login', (req, res) => {
+    if (req.session && req.session.authenticated) {
+        return res.redirect('/stats');
+    }
+    res.sendFile(path.join(__dirname, '../protected/login.html'));
+});
+
+app.post('/login', (req, res) => {
+    const { username, password } = req.body || {};
+    if (username === process.env.ID_STATS && password === process.env.MDP_STATS) {
+        req.session.authenticated = true;
+        return res.json({ status: 'ok' });
+    }
+    return res.status(401).json({ error: 'Identifiants incorrects' });
+});
+
+app.post('/logout', (req, res) => {
+    req.session.destroy(() => {
+        res.json({ status: 'ok' });
+    });
+});
+
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => {
+        res.redirect('/login');
+    });
+});
+
 // Route HTML pour les stats
-app.get('/stats', basicAuthStats, (req, res) => {
+app.get('/stats', requireStatsAuthPage, (req, res) => {
     res.sendFile(path.join(__dirname, '../protected/stats.html'));
 });
 
@@ -307,34 +348,72 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-app.get('/api/stats', basicAuthStats, (req, res) => {
+app.get('/api/stats', requireStatsAuthApi, (req, res) => {
     const uptimeMs = Date.now() - botStats.startTime;
-    
+
     const avgTokensSession = botStats.session.totalConversations > 0
         ? Math.round((botStats.session.totalPromptTokens + botStats.session.totalCompletionTokens) / botStats.session.totalConversations)
         : 0;
-        
+
     const avgTokensGlobal = botStats.global.totalConversations > 0
         ? Math.round((botStats.global.totalPromptTokens + botStats.global.totalCompletionTokens) / botStats.global.totalConversations)
         : 0;
-        
-    res.json({ 
-        uptime: uptimeMs, 
+
+    const avgResponseTimeSession = botStats.session.totalTimedRequests > 0
+        ? Math.round(botStats.session.totalResponseTimeMs / botStats.session.totalTimedRequests)
+        : 0;
+
+    const avgResponseTimeGlobal = botStats.global.totalTimedRequests > 0
+        ? Math.round(botStats.global.totalResponseTimeMs / botStats.global.totalTimedRequests)
+        : 0;
+
+    const nonCompliantRateSession = botStats.session.totalConversations > 0
+        ? botStats.session.totalNonCompliant / botStats.session.totalConversations
+        : 0;
+
+    const nonCompliantRateGlobal = botStats.global.totalConversations > 0
+        ? botStats.global.totalNonCompliant / botStats.global.totalConversations
+        : 0;
+
+    // On ne renvoie pas la liste brute des identifiants (uniqueUserIds), seulement son décompte
+    const { uniqueUserIds, ...globalWithoutUserIds } = botStats.global;
+
+    res.json({
+        uptime: uptimeMs,
         totalFilesParsed: botStats.totalFilesParsed,
         totalChunksIndexed: botStats.totalChunksIndexed,
-        session: { ...botStats.session, avgTokensPerRequest: avgTokensSession },
-        global: { ...botStats.global, avgTokensPerRequest: avgTokensGlobal }
+        cacheHits: botStats.cacheHits || 0,
+        session: {
+            ...botStats.session,
+            avgTokensPerRequest: avgTokensSession,
+            avgResponseTimeMs: avgResponseTimeSession,
+            nonCompliantRate: nonCompliantRateSession,
+            uniqueUsers: getSessionUniqueUsersCount(),
+        },
+        global: {
+            ...globalWithoutUserIds,
+            avgTokensPerRequest: avgTokensGlobal,
+            avgResponseTimeMs: avgResponseTimeGlobal,
+            nonCompliantRate: nonCompliantRateGlobal,
+            uniqueUsers: uniqueUserIds ? uniqueUserIds.length : 0,
+        }
     });
 });
 
 // Route Historique détaillé
-app.get('/api/stats/history', basicAuthStats, (req, res) => {
+app.get('/api/stats/history', requireStatsAuthApi, (req, res) => {
     const hourly = aggregateHistory('hour');
     const daily = aggregateHistory('day');
+    const hourOfDay = aggregateByHourOfDay();
+    const weekday = aggregateByWeekday();
+    const topUsers = getTopUsers(10);
     res.json({
         entries: botStats.history,
         hourly,
-        daily
+        daily,
+        hourOfDay,
+        weekday,
+        topUsers
     });
 });
 
