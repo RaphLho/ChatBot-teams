@@ -235,6 +235,12 @@ body {
     letter-spacing: -0.01em;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 /* ============================================ */
 /* Mode Selector (Tester en tant que...)        */
 /* ============================================ */

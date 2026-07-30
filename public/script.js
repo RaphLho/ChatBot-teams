@@ -3,6 +3,7 @@ const messageInput = document.getElementById('message-input');
 const chatContainer = document.getElementById('chat-container');
 const sendBtn = document.getElementById('send-btn');
 const newChatBtn = document.getElementById('new-chat-btn');
+const exportChatBtn = document.getElementById('export-chat-btn');
 
 // Auto-resize textarea
 messageInput.addEventListener('input', function() {
@@ -246,3 +247,46 @@ renderStatsNavSlot();
 newChatBtn.addEventListener('click', () => {
     resetConversationUI();
 });
+
+// ============================================
+// Export de la conversation (fichier texte téléchargeable)
+// ============================================
+function exportConversation() {
+    const messages = Array.from(chatContainer.querySelectorAll('.message')).filter(
+        el => el.id !== 'typing-indicator'
+    );
+
+    const now = new Date();
+    const dateLabel = now.toLocaleString('fr-FR');
+    const modeLabel = (currentMode && MODE_INFO[currentMode]) ? MODE_INFO[currentMode].label : 'Mode normal';
+
+    let lines = [
+        'Conversation exportée le ' + dateLabel,
+        modeLabel,
+        ''
+    ];
+
+    messages.forEach(el => {
+        const isUser = el.classList.contains('user');
+        const bubble = el.querySelector('.bubble');
+        const text = (bubble.innerText || bubble.textContent || '').trim();
+        lines.push(isUser ? 'Vous :' : 'Assistant :');
+        lines.push(text);
+        lines.push('');
+    });
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    a.href = url;
+    a.download = `conversation-${stamp}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+if (exportChatBtn) {
+    exportChatBtn.addEventListener('click', exportConversation);
+}
