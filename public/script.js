@@ -24,6 +24,65 @@ if (typeof marked !== 'undefined') {
 // Generate an anonymous unique user ID for the session
 let currentUserId = 'web_user_' + Math.random().toString(36).substr(2, 9);
 
+// ============================================
+// Mode Selector (Tester en tant qu'étudiant / Collaborateur)
+// ============================================
+let currentMode = 'collaborateur'; // mode par défaut ; null = mode normal (aucune restriction), 'etudiant', ou 'collaborateur'
+
+const modeSelector = document.getElementById('mode-selector');
+const modeSelectorBtn = document.getElementById('mode-selector-btn');
+const modeSelectorLabel = document.getElementById('mode-selector-label');
+
+const MODE_INFO = {
+    etudiant: { label: 'Mode : Étudiant' },
+    collaborateur: { label: 'Mode : Collaborateur' }
+};
+
+function resetConversationUI() {
+    currentUserId = 'web_user_' + Math.random().toString(36).substr(2, 9);
+    chatContainer.innerHTML = '';
+    const welcomeMsg = createMessageElement("Bonjour ! Je suis votre assistant pédagogique IA.\n\nPosez-moi vos questions sur les cours et je ferai de mon mieux pour vous aider !");
+    chatContainer.appendChild(welcomeMsg);
+}
+
+function applyMode(mode, { reset = true } = {}) {
+    currentMode = mode;
+
+    modeSelectorLabel.textContent = (mode && MODE_INFO[mode]) ? MODE_INFO[mode].label : 'Mode normal';
+
+    // Coche sur l'option active dans le menu
+    document.querySelectorAll('.mode-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.mode === mode);
+    });
+
+    if (reset) resetConversationUI();
+}
+
+if (modeSelector && modeSelectorBtn) {
+    modeSelectorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        modeSelector.classList.toggle('open');
+    });
+
+    document.querySelectorAll('.mode-option').forEach(option => {
+        option.addEventListener('click', () => {
+            const mode = option.dataset.mode;
+            // Cliquer sur le mode déjà actif désactive le mode de test (retour au mode normal)
+            applyMode(currentMode === mode ? null : mode);
+            modeSelector.classList.remove('open');
+        });
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!modeSelector.contains(e.target)) {
+            modeSelector.classList.remove('open');
+        }
+    });
+
+    // Applique l'état visuel du mode par défaut sans réinitialiser la conversation au chargement
+    applyMode(currentMode, { reset: false });
+}
+
 function createMessageElement(text, isUser = false) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${isUser ? 'user' : 'bot'}`;
@@ -110,7 +169,7 @@ form.addEventListener('submit', async (e) => {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, userId: currentUserId })
+            body: JSON.stringify({ question, userId: currentUserId, mode: currentMode })
         });
         
         const data = await response.json();
@@ -183,14 +242,7 @@ async function renderStatsNavSlot() {
 
 renderStatsNavSlot();
 
-// New Chat Button
+// New Chat Button (conserve le mode de test actif, réinitialise juste la conversation)
 newChatBtn.addEventListener('click', () => {
-    // Generate new ID to get fresh conversation context without memory from previous one
-    currentUserId = 'web_user_' + Math.random().toString(36).substr(2, 9);
-    
-    // Clear container except the welcome message
-    chatContainer.innerHTML = '';
-    
-    const welcomeMsg = createMessageElement("Bonjour ! Je suis votre assistant pédagogique IA.\n\nPosez-moi vos questions sur les cours et je ferai de mon mieux pour vous aider !");
-    chatContainer.appendChild(welcomeMsg);
+    resetConversationUI();
 });

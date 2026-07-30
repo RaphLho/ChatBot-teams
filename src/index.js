@@ -42,6 +42,17 @@ app.use(session({
     },
 }));
 
+// --- CATEGORISATION DES DOCUMENTS (Étudiant / Collaborateur) ---
+// Déduite du chemin OneDrive du document (dossier "Etudiant" ou "Collaborateur" à la racine
+// du dossier indexé). Calculée à la volée à partir de "source" plutôt que persistée, pour
+// rester valable même sur un cache constitué avant l'ajout de cette fonctionnalité.
+function getCategoryFromPath(fullPath) {
+    const segments = (fullPath || '').split('/');
+    if (segments.includes('Etudiant')) return 'etudiant';
+    if (segments.includes('Collaborateur')) return 'collaborateur';
+    return 'autre';
+}
+
 // --- DECOUPAGE DU TEXTE ---
 function splitText(text, chunkSize = 600, overlap = 100) {
     const chunks = [];
@@ -113,8 +124,18 @@ class LocalRamVectorStore {
         }
     }
 
-    async similaritySearch(query, k = 3) {
-        if (this.documents.length === 0) return [];
+    /**
+     * @param {string} query
+     * @param {number} k
+     * @param {'etudiant'|'collaborateur'|null} category - Si fourni, ne recherche que parmi les
+     *   documents dont le chemin OneDrive appartient au dossier "Etudiant" ou "Collaborateur" correspondant.
+     */
+    async similaritySearch(query, k = 3, category = null) {
+        const pool = category
+            ? this.documents.filter(doc => getCategoryFromPath(doc.source) === category)
+            : this.documents;
+
+        if (pool.length === 0) return [];
 
         const response = await this.mistralClient.embeddings.create({
             model: 'mistral-embed',
@@ -127,7 +148,7 @@ class LocalRamVectorStore {
         }
         const queryVector = response.data[0].embedding;
 
-        const scores = this.documents.map(doc => {
+        const scores = pool.map(doc => {
             let dot = 0, normA = 0, normB = 0;
             for (let i = 0; i < queryVector.length; i++) {
                 dot += queryVector[i] * doc.embedding[i];
@@ -338,9 +359,10 @@ app.post('/api/messages', async (req, res) => {
 app.post('/api/chat', async (req, res) => {
     if (!bot_instance) return res.status(503).json({ error: "Bot en cours d'initialisation..." });
     try {
-        const { question, userId = "web_user" } = req.body;
+        const { question, userId = "web_user", mode = null } = req.body;
         if (!question) return res.status(400).json({ error: "Question manquante" });
-        const answer = await bot_instance.askQuestion(question, userId);
+        const validMode = (mode === 'etudiant' || mode === 'collaborateur') ? mode : null;
+        const answer = await bot_instance.askQuestion(question, userId, validMode);
         res.json({ answer });
     } catch (error) {
         console.error("Erreur Web API:", error);

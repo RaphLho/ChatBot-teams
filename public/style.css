@@ -235,6 +235,129 @@ body {
     letter-spacing: -0.01em;
 }
 
+/* ============================================ */
+/* Mode Selector (Tester en tant que...)        */
+/* ============================================ */
+.mode-selector {
+    position: relative;
+}
+
+.mode-selector-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+}
+
+.mode-selector-btn:hover {
+    border-color: #d4d4d8;
+}
+
+.mode-selector-chevron {
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.mode-selector.open .mode-selector-chevron {
+    transform: rotate(180deg);
+}
+
+.mode-selector-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-lg);
+    padding: 8px;
+    width: 300px;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 100;
+}
+
+.mode-selector.open .mode-selector-menu {
+    display: flex;
+}
+
+.mode-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    width: 100%;
+    transition: all 0.15s ease;
+}
+
+.mode-option:hover {
+    background: var(--primary-light);
+}
+
+.mode-option.selected {
+    background: var(--primary-light);
+    border-color: var(--border);
+}
+
+.mode-option-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+.mode-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.mode-option-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.mode-option-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.mode-option-check {
+    margin-left: auto;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    visibility: hidden;
+}
+
+.mode-option.selected .mode-option-check {
+    visibility: visible;
+}
+
 .course-badge {
     background: var(--primary-light);
     color: var(--primary);
