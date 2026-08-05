@@ -1,10 +1,12 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express from 'express';
 import session from 'express-session';
 import { BotFrameworkAdapter } from 'botbuilder';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { getAuthCodeUrl, acquireTokenByCode, getLogoutUrl } from './msalClient.js';
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -292,7 +294,10 @@ async function initKnowledgeBase(mistralClient) {
 // --- DEMARRAGE DU SERVEUR ---
 const PORT = process.env.PORT || 3978;
 
-app.use(express.static(path.join(__dirname, '../public')));
+// index:false : la page d'accueil (index.html) est servie explicitement via la route
+// GET '/' ci-dessous, protégée par le SSO. Les autres fichiers statiques (css/js) restent
+// accessibles pour ne pas casser l'affichage de la page de connexion / redirection.
+app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
 // --- MIDDLEWARE AUTH STATS (session) ---
 function requireStatsAuthPage(req, res, next) {
@@ -309,9 +314,110 @@ function requireStatsAuthApi(req, res, next) {
     return res.status(401).json({ error: 'Authentification requise' });
 }
 
+// --- MIDDLEWARE SSO MICROSOFT (accès à la page chatbot) ---
+// Domaines email autorisés par rôle, séparés par des virgules (ex: "campus-espl.fr,autre-domaine.fr").
+// Le rôle (étudiant/collaborateur) est déduit du domaine de l'utilisateur connecté : il remplace
+// le sélecteur manuel de mode qui existait auparavant côté interface.
+function parseDomainList(value) {
+    return (value || '').split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+}
+
+const STUDENT_EMAIL_DOMAINS = parseDomainList(process.env.STUDENT_EMAIL_DOMAINS);
+const COLLABORATOR_EMAIL_DOMAINS = parseDomainList(process.env.COLLABORATOR_EMAIL_DOMAINS);
+
+function resolveRoleFromEmail(email) {
+    if (STUDENT_EMAIL_DOMAINS.some(domain => email.endsWith(`@${domain}`))) return 'etudiant';
+    if (COLLABORATOR_EMAIL_DOMAINS.some(domain => email.endsWith(`@${domain}`))) return 'collaborateur';
+    return null;
+}
+
+function requireChatAuthPage(req, res, next) {
+    if (req.session && req.session.chatUser) {
+        return next();
+    }
+    return res.redirect('/connexion');
+}
+
+function requireChatAuthApi(req, res, next) {
+    if (req.session && req.session.chatUser) {
+        return next();
+    }
+    return res.status(401).json({ error: 'Connexion Microsoft requise' });
+}
+
+app.get('/auth/login', async (req, res) => {
+    try {
+        const state = crypto.randomBytes(16).toString('hex');
+        req.session.authState = state;
+        const authUrl = await getAuthCodeUrl(state);
+        res.redirect(authUrl);
+    } catch (err) {
+        console.error('Erreur lors de la génération de l\'URL de connexion Microsoft:', err);
+        res.status(500).send("Impossible de contacter Microsoft pour la connexion.");
+    }
+});
+
+app.get('/auth/callback', async (req, res) => {
+    const { code, state, error, error_description } = req.query;
+
+    if (error) {
+        console.error('Erreur retournée par Microsoft:', error, error_description);
+        return res.redirect('/connexion?ssoError=denied');
+    }
+
+    if (!state || state !== req.session.authState) {
+        return res.status(400).send('Requête de connexion invalide (state incorrect).');
+    }
+    delete req.session.authState;
+
+    try {
+        const tokenResponse = await acquireTokenByCode(code);
+        const email = (tokenResponse.account?.username || '').toLowerCase();
+        const name = tokenResponse.account?.name || email;
+        const role = resolveRoleFromEmail(email);
+
+        if (!role) {
+            console.warn(`Connexion refusée pour ${email} (domaine non autorisé).`);
+            return res.redirect('/connexion?ssoError=domain');
+        }
+
+        req.session.chatUser = { email, name, role };
+        res.redirect('/');
+    } catch (err) {
+        console.error('Erreur lors de l\'échange du code SSO:', err);
+        res.redirect('/connexion?ssoError=failed');
+    }
+});
+
+app.get('/auth/logout', (req, res) => {
+    const postLogoutRedirectUri = `${req.protocol}://${req.get('host')}/`;
+    req.session.destroy(() => {
+        res.redirect(getLogoutUrl(postLogoutRedirectUri));
+    });
+});
+
+// Informations sur l'utilisateur Microsoft connecté (affichage côté page chatbot)
+app.get('/api/auth/me', requireChatAuthApi, (req, res) => {
+    const { email, name, role } = req.session.chatUser;
+    res.json({ email, name, role });
+});
+
 // Statut d'authentification (utilisé par la page d'accueil pour afficher l'onglet Stats ou le bouton Connexion)
 app.get('/api/auth/status', (req, res) => {
     res.json({ authenticated: !!(req.session && req.session.authenticated) });
+});
+
+// Page de connexion Microsoft (bouton "Se connecter avec Microsoft")
+app.get('/connexion', (req, res) => {
+    if (req.session && req.session.chatUser) {
+        return res.redirect('/');
+    }
+    res.sendFile(path.join(__dirname, '../protected/sso-login.html'));
+});
+
+// Page d'accueil du chatbot, protégée par le SSO Microsoft
+app.get('/', requireChatAuthPage, (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 // Route de connexion
@@ -356,12 +462,14 @@ app.post('/api/messages', async (req, res) => {
 });
 
 // Point d'entrée pour l'Interface Web
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', requireChatAuthApi, async (req, res) => {
     if (!bot_instance) return res.status(503).json({ error: "Bot en cours d'initialisation..." });
     try {
-        const { question, userId = "web_user", mode = null } = req.body;
+        const { question, userId = "web_user" } = req.body;
         if (!question) return res.status(400).json({ error: "Question manquante" });
-        const validMode = (mode === 'etudiant' || mode === 'collaborateur') ? mode : null;
+        // Le mode est déterminé par le rôle déduit du domaine Microsoft de l'utilisateur connecté,
+        // jamais par une valeur envoyée par le client.
+        const validMode = req.session.chatUser.role;
         const answer = await bot_instance.askQuestion(question, userId, validMode);
         res.json({ answer });
     } catch (error) {

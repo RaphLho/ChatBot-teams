@@ -80,6 +80,11 @@ $RECYCLE.BIN/
 !.vscode/extensions.json
 !.vscode/settings.json.example
 
+.chatgpt
+.codex
+.claude
+
+
 # JetBrains
 .idea/
 *.iml

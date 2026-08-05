@@ -26,12 +26,10 @@ if (typeof marked !== 'undefined') {
 let currentUserId = 'web_user_' + Math.random().toString(36).substr(2, 9);
 
 // ============================================
-// Mode Selector (Tester en tant qu'étudiant / Collaborateur)
+// Rôle (Étudiant / Collaborateur), déduit du domaine du compte Microsoft connecté
 // ============================================
-let currentMode = 'collaborateur'; // mode par défaut ; null = mode normal (aucune restriction), 'etudiant', ou 'collaborateur'
+let currentMode = null; // renseigné par renderChatUserInfo() une fois le rôle connu
 
-const modeSelector = document.getElementById('mode-selector');
-const modeSelectorBtn = document.getElementById('mode-selector-btn');
 const modeSelectorLabel = document.getElementById('mode-selector-label');
 
 const MODE_INFO = {
@@ -46,42 +44,11 @@ function resetConversationUI() {
     chatContainer.appendChild(welcomeMsg);
 }
 
-function applyMode(mode, { reset = true } = {}) {
+function applyMode(mode) {
     currentMode = mode;
-
-    modeSelectorLabel.textContent = (mode && MODE_INFO[mode]) ? MODE_INFO[mode].label : 'Mode normal';
-
-    // Coche sur l'option active dans le menu
-    document.querySelectorAll('.mode-option').forEach(opt => {
-        opt.classList.toggle('selected', opt.dataset.mode === mode);
-    });
-
-    if (reset) resetConversationUI();
-}
-
-if (modeSelector && modeSelectorBtn) {
-    modeSelectorBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        modeSelector.classList.toggle('open');
-    });
-
-    document.querySelectorAll('.mode-option').forEach(option => {
-        option.addEventListener('click', () => {
-            const mode = option.dataset.mode;
-            // Cliquer sur le mode déjà actif désactive le mode de test (retour au mode normal)
-            applyMode(currentMode === mode ? null : mode);
-            modeSelector.classList.remove('open');
-        });
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!modeSelector.contains(e.target)) {
-            modeSelector.classList.remove('open');
-        }
-    });
-
-    // Applique l'état visuel du mode par défaut sans réinitialiser la conversation au chargement
-    applyMode(currentMode, { reset: false });
+    if (modeSelectorLabel) {
+        modeSelectorLabel.textContent = (mode && MODE_INFO[mode]) ? MODE_INFO[mode].label : 'Mode normal';
+    }
 }
 
 function createMessageElement(text, isUser = false) {
@@ -170,7 +137,7 @@ form.addEventListener('submit', async (e) => {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, userId: currentUserId, mode: currentMode })
+            body: JSON.stringify({ question, userId: currentUserId })
         });
         
         const data = await response.json();
@@ -242,6 +209,28 @@ async function renderStatsNavSlot() {
 }
 
 renderStatsNavSlot();
+
+// Affiche l'utilisateur Microsoft connecté (SSO) et le lien de déconnexion
+async function renderChatUserInfo() {
+    const slot = document.getElementById('chat-user-info');
+    try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        applyMode(data.role);
+
+        if (slot) {
+            slot.innerHTML = `
+                <span title="${data.email}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${data.name}</span>
+                <a href="/auth/logout" style="text-decoration:none; color:inherit; opacity:0.8; white-space:nowrap;">Déconnexion</a>`;
+        }
+    } catch (err) {
+        // silencieux : l'utilisateur reste affiché sans info si l'appel échoue
+    }
+}
+
+renderChatUserInfo();
 
 // New Chat Button (conserve le mode de test actif, réinitialise juste la conversation)
 newChatBtn.addEventListener('click', () => {
