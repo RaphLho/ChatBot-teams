@@ -87,6 +87,25 @@
             </div>
         </main>
 
+        <!-- Modale de confirmation : nouvelle conversation -->
+        <div class="modal" id="new-chat-modal" style="display:none;">
+            <div class="modal-content" style="max-width:420px;">
+                <div class="modal-header">
+                    <h2>Nouvelle conversation</h2>
+                    <span class="close-modal" id="new-chat-modal-close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p style="margin:0; color:var(--text-primary); line-height:1.6;">
+                        Cette discussion sera <strong>définitivement effacée</strong> et remplacée par une nouvelle conversation vierge.
+                    </p>
+                </div>
+                <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:12px;">
+                    <button type="button" class="secondary-btn" id="new-chat-cancel-btn" style="width:auto;">Annuler</button>
+                    <button type="button" class="secondary-btn" id="new-chat-confirm-btn" style="width:auto; background:var(--primary); color:white; border-color:var(--primary);">Effacer et continuer</button>
+                </div>
+            </div>
+        </div>
+
     <!-- Script inclus avec marked.js pour supporter le Markdown en réponse -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="script.js"></script>

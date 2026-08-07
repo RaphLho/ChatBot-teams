@@ -165,7 +165,43 @@ class LocalRamVectorStore {
     }
 }
 
+// --- DECOUPAGE D'UN TABLEAU (CSV) EN BLOCS AVEC EN-TETE REPETE ---
+// Un découpage brut par caractères (splitText) coupe les lignes n'importe où et ne conserve
+// l'en-tête (noms de colonnes) que dans le premier bloc : tous les blocs suivants deviennent
+// illisibles hors contexte. Ici, on découpe ligne par ligne et on répète l'en-tête + le préfixe
+// (nom de feuille) dans CHAQUE bloc, pour que la recherche vectorielle puisse renvoyer n'importe
+// quel bloc de manière autonome, sans perdre le sens des colonnes.
+function chunkCsvWithHeader(csvText, prefix = "", chunkSize = 1200, overlapRows = 2) {
+    const lines = csvText.split(/\r?\n/).filter(l => l.length > 0);
+    if (lines.length === 0) return [];
+
+    const headerLine = lines[0];
+    const dataLines = lines.slice(1);
+    if (dataLines.length === 0) return [`${prefix}${headerLine}`];
+
+    const header = `${prefix}${headerLine}`;
+    const chunks = [];
+    let current = [];
+    let currentLen = header.length;
+
+    for (const line of dataLines) {
+        if (current.length > 0 && currentLen + line.length + 1 > chunkSize) {
+            chunks.push([header, ...current].join('\n'));
+            current = current.slice(-overlapRows);
+            currentLen = header.length + current.reduce((sum, l) => sum + l.length + 1, 0);
+        }
+        current.push(line);
+        currentLen += line.length + 1;
+    }
+    if (current.length > 0) chunks.push([header, ...current].join('\n'));
+
+    return chunks;
+}
+
 // --- EXTRACTION DE TEXTE DEPUIS UN BUFFER ---
+// Retourne soit une chaîne de texte brut (documents non tabulaires, découpés ensuite par
+// splitText), soit un tableau de blocs déjà découpés avec en-tête répétée (CSV/Excel), pour
+// éviter la perte de colonnes décrite dans chunkCsvWithHeader ci-dessus.
 async function extractTextFromBuffer(buffer, ext) {
     switch (ext) {
         case '.pdf':
@@ -176,21 +212,22 @@ async function extractTextFromBuffer(buffer, ext) {
         case '.texte':
         case '.json':
         case '.xml':
-        case '.csv':
             return buffer.toString('utf8');
+        case '.csv':
+            return chunkCsvWithHeader(buffer.toString('utf8'));
         case '.docx':
             const docxData = await mammoth.extractRawText({ buffer });
             return docxData.value;
         case '.xlsx':
         case '.xls':
             const workbook = xlsx.read(buffer, { type: 'buffer' });
-            let text = "";
+            let tableChunks = [];
             for (const sheetName of workbook.SheetNames) {
                 const sheet = workbook.Sheets[sheetName];
-                text += `\n--- Feuille: ${sheetName} ---\n`;
-                text += xlsx.utils.sheet_to_csv(sheet);
+                const csv = xlsx.utils.sheet_to_csv(sheet);
+                tableChunks = tableChunks.concat(chunkCsvWithHeader(csv, `--- Feuille: ${sheetName} ---\n`));
             }
-            return text;
+            return tableChunks;
         default:
             throw new Error(`Format non pris en charge : ${ext}`);
     }
@@ -247,9 +284,14 @@ async function initKnowledgeBase(mistralClient) {
         for (const doc of downloadedDocs) {
             console.log(`📄 Traitement : ${doc.name}`);
             try {
-                const text = await extractTextFromBuffer(doc.buffer, doc.ext);
-                if (text && text.trim().length > 0) {
-                    const chunks = splitText(text, 600, 100);
+                const extracted = await extractTextFromBuffer(doc.buffer, doc.ext);
+                // CSV/Excel arrivent déjà découpés (en-tête répétée dans chaque bloc, voir
+                // chunkCsvWithHeader) ; les autres formats sont une chaîne à découper ici.
+                const chunks = Array.isArray(extracted)
+                    ? extracted
+                    : (extracted && extracted.trim().length > 0 ? splitText(extracted, 600, 100) : []);
+
+                if (chunks.length > 0) {
                     chunks.forEach(c => newChunks.push({ text: c, source: doc.fullPath }));
                 } else {
                     console.log(`   ⚠️ Document vide ou illisible : ${doc.name}`);

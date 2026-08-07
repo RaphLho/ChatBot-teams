@@ -262,7 +262,7 @@ class RAGBot extends ActivityHandler {
         let contextDocs = "";
         if (this.vectorStore) {
             try {
-                const results = await this.vectorStore.similaritySearch(searchContext, 2, mode);
+                const results = await this.vectorStore.similaritySearch(searchContext, 5, mode);
                 if (results.length > 0) {
                     contextDocs = results
                         .map(r => `[Source: ${r.source.split('/').pop()}]\n${r.text}`)

@@ -3,6 +3,10 @@ const messageInput = document.getElementById('message-input');
 const chatContainer = document.getElementById('chat-container');
 const sendBtn = document.getElementById('send-btn');
 const newChatBtn = document.getElementById('new-chat-btn');
+const newChatModal = document.getElementById('new-chat-modal');
+const newChatCancelBtn = document.getElementById('new-chat-cancel-btn');
+const newChatConfirmBtn = document.getElementById('new-chat-confirm-btn');
+const newChatModalClose = document.getElementById('new-chat-modal-close');
 const exportChatBtn = document.getElementById('export-chat-btn');
 
 // Auto-resize textarea
@@ -234,6 +238,25 @@ renderChatUserInfo();
 
 // New Chat Button (conserve le mode de test actif, réinitialise juste la conversation)
 newChatBtn.addEventListener('click', () => {
+    newChatModal.style.display = 'flex';
+});
+
+newChatCancelBtn.addEventListener('click', () => {
+    newChatModal.style.display = 'none';
+});
+
+newChatModalClose.addEventListener('click', () => {
+    newChatModal.style.display = 'none';
+});
+
+newChatModal.addEventListener('click', (e) => {
+    if (e.target === newChatModal) {
+        newChatModal.style.display = 'none';
+    }
+});
+
+newChatConfirmBtn.addEventListener('click', () => {
+    newChatModal.style.display = 'none';
     resetConversationUI();
 });
 
