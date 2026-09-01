@@ -319,10 +319,10 @@ class RAGBot extends ActivityHandler {
             const promptTk = usage.promptTokens || usage.prompt_tokens || 0;
             const completionTk = usage.completionTokens || usage.completion_tokens || 0;
             console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}`);
-            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs);
+            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest');
         } else {
             console.warn('⚠️ Pas de données usage dans la réponse Mistral');
-            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs);
+            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest');
         }
 
         // 5. Mise en cache et historique
@@ -357,7 +357,7 @@ class RAGBot extends ActivityHandler {
             });
             if (response.usage) {
                 const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
-                recordUsage(embTk, 0, 'embedding_topic_check');
+                recordUsage(embTk, 0, 'embedding_topic_check', '', '', false, null, 'mistral-embed');
             }
             const [vecA, vecB] = response.data.map(d => d.embedding);
             let dot = 0, normA = 0, normB = 0;

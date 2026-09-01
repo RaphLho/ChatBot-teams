@@ -8,12 +8,12 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 const msalClient = new ConfidentialClientApplication({
     auth: {
         clientId: process.env.MICROSOFT_APP_ID,
-        authority: 'https://login.microsoftonline.com/organizations',
+        authority: 'https://login.microsoftonline.com/common',
         clientSecret: process.env.MICROSOFT_APP_PASSWORD,
     },
 });
 
-const SCOPES = ['User.Read'];
+const SCOPES = ['openid', 'profile', 'email'];
 
 export function getAuthCodeUrl(state) {
     return msalClient.getAuthCodeUrl({

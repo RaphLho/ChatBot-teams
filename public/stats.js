@@ -425,12 +425,20 @@ function initWeekdayChart(data) {
 }
 
 // ============================================
-// Number Formatting
+// Number & Bytes Formatting
 // ============================================
 function formatNumber(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return n.toLocaleString('fr-FR');
+    return (n || 0).toLocaleString('fr-FR');
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 Ko';
+    if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' Go';
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' Mo';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' Ko';
+    return bytes + ' o';
 }
 
 function formatUptime(ms) {
@@ -469,6 +477,10 @@ function formatTimestamp(ts) {
     });
 }
 
+function formatCost(amount) {
+    return `~${Math.max(0.01, amount).toFixed(2)} €`;
+}
+
 // ============================================
 // Animate Counter
 // ============================================
@@ -481,43 +493,66 @@ function animateValue(element, target) {
 }
 
 // ============================================
-// Load Stats & History
+// Load Stats, History & Files
 // ============================================
 let currentRange = 'hourly';
+let currentHistoryFilter = 'all';
+let lastHistoryEntries = [];
+let currentFileChunks = [];
+let currentFileFullText = '';
 
 async function loadStats() {
     try {
-        const [statsRes, historyRes] = await Promise.all([
+        const [statsRes, historyRes, filesRes] = await Promise.all([
             fetch('/api/stats'),
-            fetch('/api/stats/history')
+            fetch('/api/stats/history'),
+            fetch('/api/stats/files')
         ]);
 
         const stats = await statsRes.json();
         const history = await historyRes.json();
+        const filesData = await filesRes.json();
 
-        // Nouveaux calculs
+        // ---- Model Cards ----
+        const gChatPrompt = stats.global.chatPromptTokens || 0;
+        const gChatCompletion = stats.global.chatCompletionTokens || 0;
+        const gEmbedTokens = stats.global.embedTokens || 0;
+
+        document.getElementById('model-chat-prompt').textContent = formatNumber(gChatPrompt);
+        document.getElementById('model-chat-completion').textContent = formatNumber(gChatCompletion);
+        document.getElementById('model-chat-requests').textContent = formatNumber(stats.global.chatRequests || 0);
+
+        const chatCost = gChatPrompt * (0.20 / 1000000) + gChatCompletion * (0.60 / 1000000);
+        document.getElementById('model-chat-cost').textContent = formatCost(chatCost);
+
+        document.getElementById('model-embed-tokens').textContent = formatNumber(gEmbedTokens);
+        document.getElementById('model-embed-requests').textContent = formatNumber(stats.global.embedRequests || 0);
+        document.getElementById('model-embed-chunks').textContent = formatNumber(stats.totalChunksIndexed || 0);
+
+        const embedCost = gEmbedTokens * (0.10 / 1000000);
+        document.getElementById('model-embed-cost').textContent = formatCost(embedCost);
+
+        // ---- Files Section ----
+        document.getElementById('files-total-count').textContent = filesData.total || 0;
+        document.getElementById('files-chunks-count').textContent = formatNumber(stats.totalChunksIndexed || filesData.totalChunks || 0);
+        document.getElementById('files-total-size').textContent = `${formatBytes(filesData.totalSize)} au total`;
+        updateFilesTable(filesData.files || []);
+
+        // ---- KPIs ----
         const date = new Date();
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         const currentMonthTokens = (stats.global.monthlyUsage && stats.global.monthlyUsage[monthKey]) ? stats.global.monthlyUsage[monthKey] : 0;
         const globalTotal = stats.global.totalPromptTokens + stats.global.totalCompletionTokens;
         const sessionTotal = stats.session.totalPromptTokens + stats.session.totalCompletionTokens;
 
-        // Update KPIs
         animateValue(document.getElementById('kpi-total-global'), globalTotal);
         animateValue(document.getElementById('kpi-total-month'), currentMonthTokens);
         animateValue(document.getElementById('kpi-total-session'), sessionTotal);
         animateValue(document.getElementById('kpi-requests'), stats.global.totalConversations);
 
-        // Calcul du coût total estimé (au lieu d'annuel qui fausse avec l'indexation massive du jour 1)
-        // Prix Mistral: ~0.10€/1M pour Embeddings, ~0.20€/1M pour Prompts (moyenne 0.15€)
-        // Prix Completion: ~0.60€/1M
-        const promptCost = stats.global.totalPromptTokens * (0.15 / 1000000);
-        const completionCost = stats.global.totalCompletionTokens * (0.6 / 1000000);
-        const totalCost = promptCost + completionCost;
+        const totalCost = chatCost + embedCost;
+        document.getElementById('kpi-total-cost').textContent = formatCost(totalCost);
 
-        document.getElementById('kpi-total-cost').textContent = `~${Math.max(0.01, totalCost).toFixed(2)} €`;
-
-        // KPIs qualité & utilisation
         document.getElementById('kpi-unique-users').textContent = formatNumber(stats.global.uniqueUsers || 0);
         document.getElementById('kpi-unique-users-session').textContent = `${formatNumber(stats.session.uniqueUsers || 0)} sur cette session`;
 
@@ -534,21 +569,19 @@ async function loadStats() {
         document.getElementById('chunks-indexed').textContent = formatNumber(stats.totalChunksIndexed);
         document.getElementById('avg-tokens').textContent = formatNumber(stats.global.avgTokensPerRequest || 0);
 
-        // Charts
+        // ---- Charts ----
         const chartData = currentRange === 'hourly' ? history.hourly : history.daily;
 
         if (chartData && chartData.length > 0) {
             initTimelineChart(chartData);
             initBarChart(chartData);
         } else {
-            // Show empty charts with placeholder data
             initTimelineChart([{ label: 'Pas de données', promptTokens: 0, completionTokens: 0, totalTokens: 0 }]);
             initBarChart([{ label: 'Pas de données', promptTokens: 0, completionTokens: 0 }]);
         }
 
         initDoughnutChart(stats.global.totalPromptTokens || 0, stats.global.totalCompletionTokens || 0);
 
-        // Nouveaux graphiques : utilisation & qualité
         initTopUsersChart(history.topUsers || []);
 
         const compliantCount = Math.max(0, (stats.session.totalConversations || 0) - (stats.session.totalNonCompliant || 0));
@@ -557,8 +590,9 @@ async function loadStats() {
         initHourOfDayChart(history.hourOfDay || []);
         initWeekdayChart(history.weekday || []);
 
-        // History table
-        updateHistoryTable(history.entries || []);
+        // ---- History Entries ----
+        lastHistoryEntries = history.entries || [];
+        renderHistoryEntries(lastHistoryEntries, currentHistoryFilter);
 
     } catch (error) {
         console.error('Erreur lors du chargement des statistiques:', error);
@@ -566,73 +600,314 @@ async function loadStats() {
 }
 
 // ============================================
-// History Table
+// Files Table
 // ============================================
-function updateHistoryTable(entries) {
-    const tbody = document.getElementById('history-tbody');
+function updateFilesTable(files) {
+    const tbody = document.getElementById('files-tbody');
+
+    if (!files || files.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 24px; font-style: italic;">Aucun fichier indexé</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = files.map(file => {
+        const ext = file.fileName.split('.').pop().toLowerCase();
+        const extClass = ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'md'].includes(ext) ? ext : '';
+
+        // Determine folder category
+        let folderClass = 'autre';
+        let folderLabel = file.folder || 'Autre';
+        const fp = file.fullPath || '';
+        if (fp.includes('Etudiant')) { folderClass = 'etudiant'; folderLabel = 'Étudiant'; }
+        else if (fp.includes('Collaborateur')) { folderClass = 'collaborateur'; folderLabel = 'Collaborateur'; }
+
+        const modDate = file.lastModified ? new Date(file.lastModified).toLocaleDateString('fr-FR', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        }) : '—';
+
+        const sizeFormatted = formatBytes(file.size);
+        const chunksCount = file.chunksCount || 0;
+
+        return `
+            <tr class="file-row-clickable" data-path="${encodeURIComponent(file.fullPath)}">
+                <td>
+                    <div class="file-name-cell">
+                        <span class="file-ext-badge ${extClass}">${ext}</span>
+                        <span class="file-name-text" title="${file.fileName}">${file.fileName}</span>
+                    </div>
+                </td>
+                <td><span class="folder-badge ${folderClass}">${folderLabel}</span></td>
+                <td class="file-size-cell"><strong>${sizeFormatted}</strong></td>
+                <td class="file-chunks-count-cell">${chunksCount} bloc(s)</td>
+                <td>${modDate}</td>
+                <td style="text-align: right;">
+                    <button class="file-view-btn" type="button" data-path="${encodeURIComponent(file.fullPath)}">
+                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        Aperçu
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Attach click events on rows & preview buttons
+    tbody.querySelectorAll('.file-row-clickable').forEach(row => {
+        row.addEventListener('click', (e) => {
+            const path = decodeURIComponent(row.getAttribute('data-path'));
+            openFileModal(path);
+        });
+    });
+}
+
+// ============================================
+// File Content Modal
+// ============================================
+async function openFileModal(filePath) {
+    const modal = document.getElementById('file-modal');
+    const nameEl = document.getElementById('file-modal-name');
+    const extEl = document.getElementById('file-modal-ext');
+    const metaEl = document.getElementById('file-modal-meta');
+    const viewerEl = document.getElementById('file-content-viewer');
+    const chunksCountEl = document.getElementById('file-modal-chunks-count');
+    const searchInput = document.getElementById('file-search-input');
+
+    if (!modal) return;
+
+    // Reset search
+    if (searchInput) searchInput.value = '';
+
+    modal.style.display = 'flex';
+    nameEl.textContent = filePath.split('/').pop();
+    extEl.textContent = filePath.split('.').pop().toUpperCase();
+    metaEl.innerHTML = '<span>Chargement des métadonnées...</span>';
+    viewerEl.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--text-secondary);">Chargement du document et des blocs vectoriels...</div>';
+    chunksCountEl.textContent = '...';
+
+    try {
+        const res = await fetch(`/api/stats/file-content?path=${encodeURIComponent(filePath)}`);
+        if (!res.ok) throw new Error(`Erreur ${res.status}`);
+        const data = await res.json();
+
+        currentFileChunks = data.chunks || [];
+        currentFileFullText = data.fullText || '';
+
+        const ext = data.fileName.split('.').pop().toLowerCase();
+        extEl.textContent = ext.toUpperCase();
+        extEl.className = `file-modal-ext-badge ${['pdf', 'docx', 'xlsx', 'csv', 'txt', 'md'].includes(ext) ? ext : ''}`;
+        nameEl.textContent = data.fileName;
+
+        let folderLabel = data.folder || 'Autre';
+        let folderClass = 'autre';
+        if (data.fullPath.includes('Etudiant')) { folderClass = 'etudiant'; folderLabel = 'Étudiant'; }
+        else if (data.fullPath.includes('Collaborateur')) { folderClass = 'collaborateur'; folderLabel = 'Collaborateur'; }
+
+        const modDate = data.lastModified ? new Date(data.lastModified).toLocaleDateString('fr-FR', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        }) : '—';
+
+        metaEl.innerHTML = `
+            <span class="folder-badge ${folderClass}">${folderLabel}</span>
+            <span>•</span>
+            <span><strong>Taille :</strong> ${formatBytes(data.size)}</span>
+            <span>•</span>
+            <span><strong>Modifié le :</strong> ${modDate}</span>
+            <span>•</span>
+            <span title="${data.fullPath}" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><strong>Chemin :</strong> ${data.fullPath}</span>
+        `;
+
+        chunksCountEl.textContent = `${currentFileChunks.length} bloc(s) RAG`;
+
+        renderFileChunks(currentFileChunks);
+
+    } catch (err) {
+        viewerEl.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--accent-rose);">❌ Impossible de charger le document : ${err.message}</div>`;
+    }
+}
+
+function renderFileChunks(chunks, query = '') {
+    const viewerEl = document.getElementById('file-content-viewer');
+    if (!chunks || chunks.length === 0) {
+        viewerEl.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--text-secondary); font-style: italic;">Aucun bloc vectoriel extrait pour ce document.</div>';
+        return;
+    }
+
+    const q = query.trim().toLowerCase();
+    const filtered = q ? chunks.filter(c => c.text && c.text.toLowerCase().includes(q)) : chunks;
+
+    if (filtered.length === 0) {
+        viewerEl.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--text-secondary); font-style: italic;">Aucun résultat pour la recherche "${escapeHtml(query)}"</div>`;
+        return;
+    }
+
+    viewerEl.innerHTML = filtered.map(chunk => {
+        let textContent = escapeHtml(chunk.text || '');
+        if (q) {
+            const regex = new RegExp(`(${escapeRegex(q)})`, 'gi');
+            textContent = textContent.replace(regex, '<mark style="background: #fef08a; padding: 1px 3px; border-radius: 3px;">$1</mark>');
+        }
+
+        return `
+            <div class="file-chunk-card">
+                <div class="file-chunk-header">
+                    <span class="file-chunk-num">Bloc #${chunk.index}</span>
+                    <span class="file-chunk-len">${chunk.length} caractères</span>
+                </div>
+                <div class="file-chunk-text">${textContent}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ============================================
+// History Entries (Card style)
+// ============================================
+function renderHistoryEntries(entries, filter) {
+    const container = document.getElementById('history-entries');
     const countEl = document.getElementById('history-count');
 
-    countEl.textContent = `${entries.length} entrée${entries.length > 1 ? 's' : ''}`;
+    // Apply filter
+    let filtered = entries;
+    if (filter === 'chat') {
+        filtered = entries.filter(e => e.model === 'mistral-small-latest');
+    } else if (filter === 'embed') {
+        filtered = entries.filter(e => e.model === 'mistral-embed');
+    }
 
-    if (entries.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucune donnée disponible</td></tr>';
+    countEl.textContent = `${filtered.length} entrée${filtered.length > 1 ? 's' : ''}`;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 32px; font-style: italic;">Aucune donnée disponible</div>';
         return;
     }
 
     // Show latest first, limit to 50
-    const recent = [...entries].reverse().slice(0, 50);
+    const recent = [...filtered].reverse().slice(0, 50);
 
-    tbody.innerHTML = recent.map(entry => `
-        <tr class="history-row ${entry.isNonCompliant ? 'row-error' : ''}"
-            data-question="${encodeURIComponent(entry.question || 'Pas de question (Indexation ou erreur)')}"
-            data-answer="${encodeURIComponent(entry.answer || 'Pas de réponse')}">
-            <td>${formatTimestamp(entry.timestamp)}</td>
-            <td><span class="user-badge">${entry.userId || 'inconnu'}</span></td>
-            <td><span class="token-badge prompt">${formatNumber(entry.promptTokens)}</span></td>
-            <td><span class="token-badge completion">${formatNumber(entry.completionTokens)}</span></td>
-            <td><span class="token-badge total">${formatNumber(entry.totalTokens)}</span></td>
-            <td>${entry.responseTimeMs ? `<span class="speed-badge">${formatResponseTime(entry.responseTimeMs)}</span>` : '—'}</td>
-            <td>${entry.isNonCompliant
-                ? '<span class="status-badge warn">⚠ Hors-sujet</span>'
-                : '<span class="status-badge ok">✓ Conforme</span>'}</td>
-        </tr>
-    `).join('');
+    container.innerHTML = recent.map(entry => {
+        const isChat = entry.model === 'mistral-small-latest';
+        const modelLabel = isChat ? 'mistral-small' : 'mistral-embed';
+        const modelClass = isChat ? 'chat' : 'embed';
 
-    // Ajout des events de clic sur chaque ligne
-    document.querySelectorAll('.history-row').forEach(row => {
-        row.addEventListener('click', () => {
-            const question = decodeURIComponent(row.getAttribute('data-question'));
-            const answer = decodeURIComponent(row.getAttribute('data-answer'));
-            
+        const question = entry.question || (isChat ? 'Pas de question' : 'Indexation / Embedding');
+        const truncatedQuestion = question.length > 100 ? question.substring(0, 100) + '…' : question;
+
+        const statusHtml = entry.isNonCompliant
+            ? '<span class="status-badge warn">🚫 Hors-sujet</span>'
+            : '<span class="status-badge ok">✓ Conforme</span>';
+
+        const timeHtml = entry.responseTimeMs
+            ? `<span class="meta-item"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${formatResponseTime(entry.responseTimeMs)}</span>`
+            : '';
+
+        return `
+            <div class="history-entry ${entry.isNonCompliant ? 'entry-noncompliant' : ''}"
+                data-question="${encodeURIComponent(entry.question || 'Pas de question')}"
+                data-answer="${encodeURIComponent(entry.answer || 'Pas de réponse')}">
+                <div class="history-entry-header">
+                    <span class="history-entry-time">
+                        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        ${formatTimestamp(entry.timestamp)}
+                    </span>
+                    <span class="history-entry-user">${entry.userId || 'inconnu'}</span>
+                </div>
+                <div class="history-entry-question">${truncatedQuestion}</div>
+                <div class="history-entry-meta">
+                    <span class="model-badge ${modelClass}">${modelLabel}</span>
+                    <span class="meta-separator"></span>
+                    ${timeHtml}
+                    ${timeHtml ? '<span class="meta-separator"></span>' : ''}
+                    <div class="history-entry-tokens">
+                        <span class="token-badge prompt">${formatNumber(entry.promptTokens)}</span>
+                        <span class="token-badge completion">${formatNumber(entry.completionTokens)}</span>
+                        <span class="token-badge total">${formatNumber(entry.totalTokens)}</span>
+                    </div>
+                    <span class="meta-separator"></span>
+                    ${statusHtml}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Click to open modal
+    container.querySelectorAll('.history-entry').forEach(card => {
+        card.addEventListener('click', () => {
+            const question = decodeURIComponent(card.getAttribute('data-question'));
+            const answer = decodeURIComponent(card.getAttribute('data-answer'));
+
             document.getElementById('modal-question').textContent = question;
-            
-            // On utilise marked.js s'il est dispo pour la réponse Markdown
+
             const answerEl = document.getElementById('modal-answer');
             if (typeof marked !== 'undefined') {
                 answerEl.innerHTML = marked.parse(answer);
             } else {
                 answerEl.textContent = answer;
             }
-            
+
             document.getElementById('history-modal').style.display = 'flex';
         });
     });
 }
 
-// Logique de fermeture de la modale
+// ============================================
+// Modal close logic & events
+// ============================================
 document.addEventListener('DOMContentLoaded', () => {
-    const modal = document.getElementById('history-modal');
-    const closeBtn = document.querySelector('.close-modal');
+    // History Modal
+    const histModal = document.getElementById('history-modal');
+    const histClose = histModal ? histModal.querySelector('.close-modal') : null;
+    if (histClose && histModal) {
+        histClose.addEventListener('click', () => { histModal.style.display = 'none'; });
+    }
 
-    if (closeBtn && modal) {
-        closeBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
+    // File Modal
+    const fileModal = document.getElementById('file-modal');
+    const fileClose = fileModal ? fileModal.querySelector('.close-file-modal') : null;
+    if (fileClose && fileModal) {
+        fileClose.addEventListener('click', () => { fileModal.style.display = 'none'; });
+    }
+
+    // Close on backdrop click
+    window.addEventListener('click', (e) => {
+        if (e.target === histModal) histModal.style.display = 'none';
+        if (e.target === fileModal) fileModal.style.display = 'none';
+    });
+
+    // Close on Escape key
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (histModal) histModal.style.display = 'none';
+            if (fileModal) fileModal.style.display = 'none';
+        }
+    });
+
+    // Search in File content
+    const searchInput = document.getElementById('file-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            renderFileChunks(currentFileChunks, e.target.value);
         });
+    }
 
-        // Fermer au clic en dehors de la modale
-        window.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
+    // Copy File content
+    const copyBtn = document.getElementById('file-copy-btn');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            if (!currentFileFullText) return;
+            try {
+                await navigator.clipboard.writeText(currentFileFullText);
+                const originalHtml = copyBtn.innerHTML;
+                copyBtn.innerHTML = '✓ Copié !';
+                setTimeout(() => { copyBtn.innerHTML = originalHtml; }, 2000);
+            } catch (err) {
+                console.error('Erreur copie presse-papier:', err);
             }
         });
     }
@@ -651,6 +926,55 @@ document.addEventListener('DOMContentLoaded', () => {
             glossaryToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
     }
+});
+
+// ============================================
+// Files Toggle
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    const filesToggle = document.getElementById('files-toggle-btn');
+    const filesCard = document.getElementById('files-card');
+
+    if (filesToggle && filesCard) {
+        filesToggle.addEventListener('click', () => {
+            filesCard.classList.toggle('open');
+        });
+    }
+});
+
+// ============================================
+// Refresh Button
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', async () => {
+            refreshBtn.disabled = true;
+            refreshBtn.classList.add('loading');
+
+            await loadStats();
+
+            setTimeout(() => {
+                refreshBtn.disabled = false;
+                refreshBtn.classList.remove('loading');
+            }, 2000);
+        });
+    }
+});
+
+// ============================================
+// History Filter
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.history-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.history-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentHistoryFilter = btn.dataset.filter;
+            renderHistoryEntries(lastHistoryEntries, currentHistoryFilter);
+        });
+    });
 });
 
 // ============================================

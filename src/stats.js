@@ -16,7 +16,13 @@ let globalStats = {
     totalTimedRequests: 0,
     uniqueUserIds: [],
     monthlyUsage: {},
-    firstLaunchDate: Date.now()
+    firstLaunchDate: Date.now(),
+    // Per-model tracking
+    chatPromptTokens: 0,
+    chatCompletionTokens: 0,
+    embedTokens: 0,
+    chatRequests: 0,
+    embedRequests: 0
 };
 
 if (fs.existsSync(STATS_FILE)) {
@@ -30,6 +36,12 @@ if (fs.existsSync(STATS_FILE)) {
         if (!globalStats.totalNonCompliant) globalStats.totalNonCompliant = 0;
         if (!globalStats.totalResponseTimeMs) globalStats.totalResponseTimeMs = 0;
         if (!globalStats.totalTimedRequests) globalStats.totalTimedRequests = 0;
+        // Ensure per-model fields exist (backward compat with old data files)
+        if (!globalStats.chatPromptTokens) globalStats.chatPromptTokens = 0;
+        if (!globalStats.chatCompletionTokens) globalStats.chatCompletionTokens = 0;
+        if (!globalStats.embedTokens) globalStats.embedTokens = 0;
+        if (!globalStats.chatRequests) globalStats.chatRequests = 0;
+        if (!globalStats.embedRequests) globalStats.embedRequests = 0;
     } catch (e) {
         console.error("Erreur lors de la lecture des statistiques globales :", e);
     }
@@ -67,6 +79,12 @@ const botStats = {
         totalNonCompliant: 0,
         totalResponseTimeMs: 0,
         totalTimedRequests: 0,
+        // Per-model tracking (session)
+        chatPromptTokens: 0,
+        chatCompletionTokens: 0,
+        embedTokens: 0,
+        chatRequests: 0,
+        embedRequests: 0,
     },
 
     global: globalStats,
@@ -91,12 +109,14 @@ const MAX_HISTORY = 1000;
  * @param {string} answer - Réponse du bot
  * @param {boolean} isNonCompliant - Vrai si la requête était hors sujet
  * @param {number|null} responseTimeMs - Temps de génération de la réponse par Mistral (ms), null si non mesuré
+ * @param {string} model - Modèle utilisé ('mistral-small-latest' ou 'mistral-embed')
  */
-function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null) {
+function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest') {
     const pTokens = promptTokens || 0;
     const cTokens = completionTokens || 0;
     const totalTk = pTokens + cTokens;
     const hasTiming = typeof responseTimeMs === 'number' && responseTimeMs >= 0;
+    const isChat = model === 'mistral-small-latest';
 
     // 1. Mise à jour de l'historique de session
     const entry = {
@@ -108,7 +128,8 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
         question,
         answer,
         isNonCompliant,
-        responseTimeMs: hasTiming ? responseTimeMs : null
+        responseTimeMs: hasTiming ? responseTimeMs : null,
+        model
     };
 
     botStats.history.push(entry);
@@ -127,6 +148,16 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
     }
     if (isRealUser(userId)) sessionUniqueUserSet.add(userId);
 
+    // Per-model session stats
+    if (isChat) {
+        botStats.session.chatPromptTokens += pTokens;
+        botStats.session.chatCompletionTokens += cTokens;
+        botStats.session.chatRequests += 1;
+    } else {
+        botStats.session.embedTokens += pTokens;
+        botStats.session.embedRequests += 1;
+    }
+
     // 3. Mise à jour des statistiques globales
     globalStats.totalPromptTokens += pTokens;
     globalStats.totalCompletionTokens += cTokens;
@@ -139,6 +170,16 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
     if (isRealUser(userId) && !globalUniqueUserSet.has(userId)) {
         globalUniqueUserSet.add(userId);
         globalStats.uniqueUserIds.push(userId);
+    }
+
+    // Per-model global stats
+    if (isChat) {
+        globalStats.chatPromptTokens += pTokens;
+        globalStats.chatCompletionTokens += cTokens;
+        globalStats.chatRequests += 1;
+    } else {
+        globalStats.embedTokens += pTokens;
+        globalStats.embedRequests += 1;
     }
 
     // 4. Statistiques mensuelles

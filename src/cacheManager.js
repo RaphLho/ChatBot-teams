@@ -15,7 +15,7 @@ export function loadCache() {
             console.error("Erreur lors de la lecture du cache :", e);
         }
     }
-    return { files: {}, documents: [] };
+    return { files: {}, documents: [], fileMeta: {} };
 }
 
 export function saveCache(cache) {

@@ -49,6 +49,14 @@
             <header class="chat-header stats-header-bar">
                 <h1>📊 Statistiques d'utilisation</h1>
                 <div class="stats-header-actions">
+                    <button class="refresh-btn" id="refresh-btn" type="button">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        Actualiser
+                    </button>
                     <span class="auto-refresh-badge" id="refresh-indicator">
                         <span class="refresh-pulse"></span>
                         Actualisation auto (30s)
@@ -59,13 +67,135 @@
             <div class="stats-scroll-area">
 
                 <!-- ============================================ -->
+                <!-- Modèles IA                                    -->
+                <!-- ============================================ -->
+                <div class="section-title">Modèles IA</div>
+                <div class="model-cards-grid">
+                    <!-- Carte mistral-small-latest (Chat) -->
+                    <div class="model-card model-card-chat">
+                        <div class="model-card-header">
+                            <div class="model-card-icon">
+                                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                                </svg>
+                            </div>
+                            <div class="model-card-title">
+                                <h3>mistral-small-latest</h3>
+                                <span>Génération de texte — Réponses conversationnelles</span>
+                            </div>
+                        </div>
+                        <div class="model-card-stats">
+                            <div class="model-stat">
+                                <span class="model-stat-label">Tokens prompt</span>
+                                <span class="model-stat-value" id="model-chat-prompt">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Tokens complétion</span>
+                                <span class="model-stat-value" id="model-chat-completion">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Requêtes chat</span>
+                                <span class="model-stat-value" id="model-chat-requests">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Coût estimé</span>
+                                <span class="model-stat-value cost" id="model-chat-cost">~0.00 €</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Carte mistral-embed (Embedding) -->
+                    <div class="model-card model-card-embed">
+                        <div class="model-card-header">
+                            <div class="model-card-icon">
+                                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="2" width="8" height="8" rx="1"/>
+                                    <rect x="14" y="2" width="8" height="8" rx="1"/>
+                                    <rect x="2" y="14" width="8" height="8" rx="1"/>
+                                    <rect x="14" y="14" width="8" height="8" rx="1"/>
+                                </svg>
+                            </div>
+                            <div class="model-card-title">
+                                <h3>mistral-embed</h3>
+                                <span>Vectorisation — Embeddings pour recherche RAG</span>
+                            </div>
+                        </div>
+                        <div class="model-card-stats">
+                            <div class="model-stat">
+                                <span class="model-stat-label">Tokens totaux</span>
+                                <span class="model-stat-value" id="model-embed-tokens">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Appels embedding</span>
+                                <span class="model-stat-value" id="model-embed-requests">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Blocs vectoriels</span>
+                                <span class="model-stat-value" id="model-embed-chunks">0</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Coût estimé</span>
+                                <span class="model-stat-value cost" id="model-embed-cost">~0.00 €</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================ -->
+                <!-- Fichiers téléchargés                          -->
+                <!-- ============================================ -->
+                <div class="section-title">Fichiers téléchargés</div>
+                <div class="files-card" id="files-card">
+                    <div class="files-header">
+                        <div class="files-header-left">
+                            <div class="files-icon">
+                                <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                </svg>
+                            </div>
+                            <div class="files-header-text">
+                                <div class="files-header-title-row">
+                                    <h3><span id="files-total-count">0</span> fichier(s) indexé(s)</h3>
+                                    <span class="files-total-size-badge" id="files-total-size">0 Ko au total</span>
+                                </div>
+                                <span><span id="files-chunks-count">0</span> blocs vectoriels générés • Cliquez sur un fichier pour visualiser son contenu</span>
+                            </div>
+                        </div>
+                        <button class="files-toggle-btn" id="files-toggle-btn" type="button">
+                            Voir les fichiers
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="files-list" id="files-list">
+                        <table class="files-table">
+                            <thead>
+                                <tr>
+                                    <th>Fichier</th>
+                                    <th>Catégorie</th>
+                                    <th>Taille</th>
+                                    <th>Blocs RAG</th>
+                                    <th>Dernière modification</th>
+                                    <th style="text-align: right;">Aperçu</th>
+                                </tr>
+                            </thead>
+                            <tbody id="files-tbody">
+                                <tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 24px;">Chargement...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ============================================ -->
                 <!-- Vue d'ensemble                                -->
                 <!-- ============================================ -->
                 <div class="section-title">Vue d'ensemble</div>
                 <div class="kpi-grid">
                     <div class="kpi-card kpi-total">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                            <!-- Icône : graphique barres (compteur de tokens global) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
@@ -77,7 +207,8 @@
                     </div>
                     <div class="kpi-card kpi-requests">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                            <!-- Icône : calendrier (mois en cours) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
@@ -89,7 +220,8 @@
                     </div>
                     <div class="kpi-card kpi-prompt">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            <!-- Icône : flèche circulaire (session = cycle) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
@@ -101,7 +233,8 @@
                     </div>
                     <div class="kpi-card kpi-completion">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <!-- Icône : envoi message (requêtes) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
@@ -113,18 +246,20 @@
                     </div>
                     <div class="kpi-card kpi-cost" style="border-left-color: var(--accent-emerald);">
                         <div class="kpi-icon" style="background-color: var(--accent-emerald-light); color: var(--accent-emerald);">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                            <!-- Icône : Euro (coût) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M7 10h7a3 3 0 0 1 0 6h-4"/><line x1="7" y1="10" x2="7" y2="16"/><line x1="6" y1="12" x2="11" y2="12"/><line x1="6" y1="14" x2="11" y2="14"/></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
                                 <span class="kpi-label">Coût total (estimé)</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Estimation approximative basée sur des tarifs Mistral moyens : ~0,15 €/1M tokens de prompt (moyenne embeddings + prompts) et ~0,60 €/1M tokens de complétion. Ordre de grandeur, pas une facture exacte.">i</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Estimation basée sur les tarifs Mistral : ~0.20 €/1M tokens prompt (chat), ~0.60 €/1M tokens complétion (chat) et ~0.10 €/1M tokens embeddings. Ordre de grandeur indicatif.">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-total-cost">0 €</span>
                         </div>
                     </div>
                     <div class="kpi-card kpi-users">
                         <div class="kpi-icon">
+                            <!-- Icône : personnes (utilisateurs) -->
                             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                         </div>
                         <div class="kpi-content">
@@ -138,12 +273,13 @@
                     </div>
                     <div class="kpi-card kpi-noncompliant">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            <!-- Icône : interdit (hors-sujet) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
                                 <span class="kpi-label">Requêtes hors-sujet</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Part des questions détectées comme hors du cadre pédagogique (ex : recettes, blagues, cinéma...) et refusées poliment par le bot. Détectée via la balise interne [NON-CONFORME]. Un taux élevé peut signaler un usage détourné.">i</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Part des questions détectées comme hors du cadre pédagogique (ex : recettes, blagues, cinéma...) et refusées poliment par le bot. Détectée via la balise interne [NON-CONFORME].">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-noncompliant-rate">0%</span>
                             <span class="kpi-sublabel" id="kpi-noncompliant-count">0 requête(s)</span>
@@ -151,24 +287,26 @@
                     </div>
                     <div class="kpi-card kpi-speed">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            <!-- Icône : chrono (temps de réponse) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
                                 <span class="kpi-label">Temps de réponse moyen</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Durée moyenne prise par Mistral pour générer une réponse, mesurée entre l'envoi de la requête et la réception complète de la réponse. N'inclut pas les réponses servies depuis le cache (instantanées).">i</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Durée moyenne prise par Mistral pour générer une réponse, mesurée entre l'envoi de la requête et la réception complète de la réponse. N'inclut pas les réponses servies depuis le cache.">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-response-time">0 s</span>
                         </div>
                     </div>
                     <div class="kpi-card kpi-cache">
                         <div class="kpi-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                            <!-- Icône : éclair (cache = instantané) -->
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                         </div>
                         <div class="kpi-content">
                             <div class="kpi-label-row">
                                 <span class="kpi-label">Cache hits (session)</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Nombre de réponses renvoyées instantanément depuis le cache mémoire du bot (question déjà posée durant cette session), sans nouvel appel à l'API Mistral. Chaque cache hit économise des tokens et du temps.">i</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Nombre de réponses renvoyées instantanément depuis le cache mémoire du bot, sans nouvel appel à l'API Mistral (0 token consommé). Chaque cache hit économise des tokens et du temps.">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-cache-hits">0</span>
                         </div>
@@ -188,7 +326,7 @@
                                 <button class="chart-toggle-btn" data-range="daily">Par jour</button>
                             </div>
                         </div>
-                        <p class="chart-card-desc">Évolution des tokens de prompt, de complétion et du total consommé au fil du temps (session en cours). Permet de repérer les pics d'usage.</p>
+                        <p class="chart-card-desc">Évolution des tokens de prompt, de complétion et du total consommé au fil du temps (session en cours).</p>
                         <div class="chart-wrapper">
                             <canvas id="chart-timeline"></canvas>
                         </div>
@@ -222,7 +360,7 @@
                         <div class="chart-card-header">
                             <h3>Top 10 utilisateurs</h3>
                         </div>
-                        <p class="chart-card-desc">Les utilisateurs ayant consommé le plus de tokens durant la session en cours (les appels d'indexation des documents ne sont pas comptés ici).</p>
+                        <p class="chart-card-desc">Les utilisateurs ayant consommé le plus de tokens durant la session en cours.</p>
                         <div class="chart-wrapper">
                             <canvas id="chart-top-users"></canvas>
                         </div>
@@ -231,7 +369,7 @@
                         <div class="chart-card-header">
                             <h3>Conformité des requêtes</h3>
                         </div>
-                        <p class="chart-card-desc">Proportion de questions conformes au cadre pédagogique par rapport aux questions hors-sujet refusées par le bot (session en cours).</p>
+                        <p class="chart-card-desc">Proportion de questions conformes au cadre pédagogique par rapport aux questions hors-sujet refusées par le bot.</p>
                         <div class="chart-wrapper chart-wrapper-square">
                             <canvas id="chart-compliance"></canvas>
                         </div>
@@ -240,7 +378,7 @@
                         <div class="chart-card-header">
                             <h3>Répartition par heure de la journée</h3>
                         </div>
-                        <p class="chart-card-desc">Nombre de requêtes reçues selon l'heure (0-23h), toutes dates confondues (session en cours). Identifie les créneaux les plus actifs.</p>
+                        <p class="chart-card-desc">Nombre de requêtes reçues selon l'heure (0-23h), toutes dates confondues (session en cours).</p>
                         <div class="chart-wrapper">
                             <canvas id="chart-hour-of-day"></canvas>
                         </div>
@@ -273,7 +411,7 @@
                     <dl class="glossary-body">
                         <div class="glossary-item">
                             <dt>Token</dt>
-                            <dd>Unité de découpage du texte utilisée par les modèles de langage (environ 3/4 de mot en moyenne, un peu moins pour le français). Chaque question posée et chaque réponse générée consomment des tokens, qui sont facturés par Mistral.</dd>
+                            <dd>Unité de découpage du texte utilisée par les modèles de langage (environ 3/4 de mot en moyenne). Chaque question posée et chaque réponse générée consomment des tokens.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Tokens de prompt</dt>
@@ -284,68 +422,54 @@
                             <dd>Tokens générés PAR le modèle pour produire sa réponse. Généralement plus coûteux par token que les tokens de prompt.</dd>
                         </div>
                         <div class="glossary-item">
+                            <dt>mistral-small-latest</dt>
+                            <dd>Modèle de langage utilisé pour générer les réponses conversationnelles. Coût : ~0.20 €/1M tokens prompt, ~0.60 €/1M tokens complétion.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>mistral-embed</dt>
+                            <dd>Modèle d'embedding utilisé pour vectoriser les documents et les questions (recherche sémantique RAG). Coût : ~0.10 €/1M tokens.</dd>
+                        </div>
+                        <div class="glossary-item">
                             <dt>Session vs Global</dt>
-                            <dd><strong>Session</strong> = depuis le dernier redémarrage du serveur (remise à zéro à chaque redéploiement). <strong>Global</strong> = cumul depuis le tout premier lancement du bot, sauvegardé sur disque et jamais réinitialisé.</dd>
+                            <dd><strong>Session</strong> = depuis le dernier redémarrage du serveur. <strong>Global</strong> = cumul depuis le tout premier lancement, sauvegardé sur disque.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Coût estimé</dt>
-                            <dd>Calculé avec des tarifs Mistral approximatifs (~0,15 €/1M tokens de prompt, ~0,60 €/1M tokens de complétion). C'est un ordre de grandeur indicatif, pas une facture exacte.</dd>
+                            <dd>Calculé avec les tarifs Mistral détaillés par modèle. C'est un ordre de grandeur indicatif, pas une facture exacte.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Requête hors-sujet ([NON-CONFORME])</dt>
-                            <dd>Le bot est instruit de préfixer sa réponse par la balise interne [NON-CONFORME] lorsque la question sort totalement du cadre pédagogique. Cette balise est retirée avant affichage mais comptabilisée dans les statistiques.</dd>
+                            <dd>Le bot préfixe sa réponse par [NON-CONFORME] quand la question sort du cadre pédagogique. Cette balise est retirée avant affichage mais comptabilisée.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Cache RAM</dt>
-                            <dd>Le bot mémorise en mémoire les réponses déjà données durant la session. Si la question exacte revient, la réponse est renvoyée instantanément sans nouvel appel à l'API Mistral (0 token consommé).</dd>
+                            <dd>Le bot mémorise les réponses durant la session. Si la même question revient, la réponse est renvoyée instantanément sans nouvel appel API.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Blocs vectoriels (chunks)</dt>
-                            <dd>Les documents de la base de connaissance sont découpés en blocs d'environ 600 caractères, puis transformés en vecteurs numériques (embeddings) pour permettre la recherche sémantique.</dd>
-                        </div>
-                        <div class="glossary-item">
-                            <dt>Recherche vectorielle (RAG)</dt>
-                            <dd>Pour chaque question, le bot recherche les blocs de cours les plus proches sémantiquement afin de baser sa réponse sur des documents réels plutôt que sur ses seules connaissances générales.</dd>
-                        </div>
-                        <div class="glossary-item">
-                            <dt>Utilisateur unique</dt>
-                            <dd>Identifiant (Teams ou web) distinct ayant posé au moins une question. Les appels internes d'indexation ne sont pas comptés comme des utilisateurs.</dd>
-                        </div>
-                        <div class="glossary-item">
-                            <dt>Temps de réponse</dt>
-                            <dd>Durée entre l'envoi de la requête à Mistral et la réception complète de la réponse. Dépend de la longueur de la réponse et de la charge du service Mistral.</dd>
+                            <dd>Les documents sont découpés en blocs d'environ 600 caractères, puis transformés en vecteurs numériques (embeddings) pour la recherche sémantique.</dd>
                         </div>
                     </dl>
                 </div>
 
                 <!-- ============================================ -->
-                <!-- History Table                                 -->
+                <!-- Historique des requêtes (cartes)              -->
                 <!-- ============================================ -->
                 <div class="history-card">
                     <div class="chart-card-header">
                         <h3>Historique des requêtes</h3>
-                        <span class="history-count" id="history-count">0 entrées</span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div class="history-filter" id="history-filter">
+                                <button class="history-filter-btn active" data-filter="all">Tous</button>
+                                <button class="history-filter-btn" data-filter="chat">Chat</button>
+                                <button class="history-filter-btn" data-filter="embed">Embeddings</button>
+                            </div>
+                            <span class="history-count" id="history-count">0 entrées</span>
+                        </div>
                     </div>
-                    <p class="chart-card-desc">Détail des 50 dernières requêtes de la session (les plus récentes en premier). Cliquez sur une ligne pour voir la question et la réponse complètes.</p>
-                    <div class="table-wrapper">
-                        <table class="history-table" id="history-table">
-                            <thead>
-                                <tr>
-                                    <th>Date &amp; Heure</th>
-                                    <th>Utilisateur</th>
-                                    <th>Prompt</th>
-                                    <th>Completion</th>
-                                    <th>Total</th>
-                                    <th>Temps</th>
-                                    <th>Statut</th>
-                                </tr>
-                            </thead>
-                            <tbody id="history-tbody">
-                                <tr class="empty-row">
-                                    <td colspan="7">Aucune donnée disponible</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <p class="chart-card-desc">Les 50 dernières requêtes de la session (les plus récentes en premier). Cliquez sur une carte pour voir la question et la réponse complètes.</p>
+                    <div class="history-entries" id="history-entries">
+                        <div style="text-align: center; color: var(--text-secondary); padding: 32px; font-style: italic;">Aucune donnée disponible</div>
                     </div>
                 </div>
 
@@ -375,6 +499,40 @@
                 <div class="modal-section">
                     <h3>Réponse de l'IA</h3>
                     <div id="modal-answer" class="modal-text"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Viewer Modal -->
+    <div id="file-modal" class="modal" style="display: none;">
+        <div class="modal-content file-modal-content">
+            <div class="modal-header">
+                <div class="file-modal-title-wrap">
+                    <div class="file-modal-ext-badge" id="file-modal-ext">PDF</div>
+                    <div>
+                        <h2 id="file-modal-name">Nom du fichier</h2>
+                        <div id="file-modal-meta" class="file-modal-meta-row"></div>
+                    </div>
+                </div>
+                <span class="close-modal close-file-modal">&times;</span>
+            </div>
+            <div class="modal-body file-modal-body">
+                <div class="file-modal-toolbar">
+                    <div class="file-search-wrap">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="file-search-input" placeholder="Rechercher dans ce document..." />
+                    </div>
+                    <div class="file-toolbar-actions">
+                        <span class="file-chunks-badge" id="file-modal-chunks-count">0 blocs</span>
+                        <button class="file-copy-btn" id="file-copy-btn" type="button">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copier tout le texte
+                        </button>
+                    </div>
+                </div>
+                <div id="file-content-viewer" class="file-content-viewer">
+                    <div style="text-align:center; padding: 40px; color: var(--text-secondary);">Chargement du document...</div>
                 </div>
             </div>
         </div>

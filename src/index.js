@@ -107,7 +107,7 @@ class LocalRamVectorStore {
                     // Tracker les tokens d'embedding
                     if (response.usage) {
                         const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
-                        recordUsage(embTk, 0, 'embedding_indexation');
+                        recordUsage(embTk, 0, 'embedding_indexation', '', '', false, null, 'mistral-embed');
                     }
                     success = true;
                 } catch (err) {
@@ -146,7 +146,7 @@ class LocalRamVectorStore {
         // Tracker les tokens d'embedding de recherche
         if (response.usage) {
             const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
-            recordUsage(embTk, 0, 'embedding_search');
+            recordUsage(embTk, 0, 'embedding_search', '', '', false, null, 'mistral-embed');
         }
         const queryVector = response.data[0].embedding;
 
@@ -266,9 +266,16 @@ async function initKnowledgeBase(mistralClient) {
 
     const filesToDownload = [];
     const currentRemotePaths = new Set();
+    if (!cache.fileMeta) cache.fileMeta = {};
 
     for (const file of remoteFiles) {
         currentRemotePaths.add(file.fullPath);
+        cache.fileMeta[file.fullPath] = {
+            name: file.name,
+            size: file.size || 0,
+            lastModified: file.lastModified,
+            ext: file.ext
+        };
         const cachedDate = cache.files[file.fullPath];
         if (!cachedDate || cachedDate !== file.lastModified) {
             filesToDownload.push(file);
@@ -321,6 +328,7 @@ async function initKnowledgeBase(mistralClient) {
 
     for (const p of pathsToRemove) {
         delete cache.files[p];
+        if (cache.fileMeta) delete cache.fileMeta[p];
     }
 
     store.documents = updatedDocuments;
@@ -357,20 +365,56 @@ function requireStatsAuthApi(req, res, next) {
 }
 
 // --- MIDDLEWARE SSO MICROSOFT (accès à la page chatbot) ---
-// Domaines email autorisés par rôle, séparés par des virgules (ex: "campus-espl.fr,autre-domaine.fr").
-// Le rôle (étudiant/collaborateur) est déduit du domaine de l'utilisateur connecté : il remplace
-// le sélecteur manuel de mode qui existait auparavant côté interface.
+// Liste par défaut des domaines pour chaque rôle (enrichie avec les variables .env)
+const DEFAULT_STUDENT_DOMAINS = [
+    'my-digital-school.org',
+    'mydigitalschool.com',
+    'etudiant.espl.fr',
+    'etudiant-espl.fr',
+    'etudiant.eduservices.fr',
+    'apprenant.espl.fr'
+];
+
+const DEFAULT_COLLABORATOR_DOMAINS = [
+    'groupe-eduservices.fr',
+    'campus-espl.fr',
+    'espl.fr',
+    'eduservices.org',
+    'eduservices.fr',
+    'my-digital-school.com'
+];
+
 function parseDomainList(value) {
     return (value || '').split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
 }
 
-const STUDENT_EMAIL_DOMAINS = parseDomainList(process.env.STUDENT_EMAIL_DOMAINS);
-const COLLABORATOR_EMAIL_DOMAINS = parseDomainList(process.env.COLLABORATOR_EMAIL_DOMAINS);
-
 function resolveRoleFromEmail(email) {
-    if (STUDENT_EMAIL_DOMAINS.some(domain => email.endsWith(`@${domain}`))) return 'etudiant';
-    if (COLLABORATOR_EMAIL_DOMAINS.some(domain => email.endsWith(`@${domain}`))) return 'collaborateur';
-    return null;
+    if (!email) return 'etudiant';
+    const cleanEmail = email.trim().toLowerCase();
+
+    const envStudentDomains = parseDomainList(process.env.STUDENT_EMAIL_DOMAINS);
+    const envCollabDomains = parseDomainList(process.env.COLLABORATOR_EMAIL_DOMAINS);
+
+    const allCollabDomains = [...new Set([...envCollabDomains, ...DEFAULT_COLLABORATOR_DOMAINS])];
+    const allStudentDomains = [...new Set([...envStudentDomains, ...DEFAULT_STUDENT_DOMAINS])];
+
+    // 1. Vérification stricte des domaines collaborateurs
+    if (allCollabDomains.some(domain => cleanEmail.endsWith(`@${domain}`) || cleanEmail.includes(`@${domain}`))) {
+        return 'collaborateur';
+    }
+
+    // 2. Vérification stricte des domaines étudiants
+    if (allStudentDomains.some(domain => cleanEmail.endsWith(`@${domain}`) || cleanEmail.includes(`@${domain}`))) {
+        return 'etudiant';
+    }
+
+    // 3. Mots-clés dans le nom ou domaine
+    if (cleanEmail.includes('eduservices') || cleanEmail.includes('campus') || cleanEmail.includes('formateur') || cleanEmail.includes('prof') || cleanEmail.includes('admin') || cleanEmail.includes('staff')) {
+        return 'collaborateur';
+    }
+
+    // 4. Par défaut : rôle étudiant pour tout autre compte Microsoft
+    return 'etudiant';
 }
 
 function requireChatAuthPage(req, res, next) {
@@ -414,16 +458,26 @@ app.get('/auth/callback', async (req, res) => {
 
     try {
         const tokenResponse = await acquireTokenByCode(code);
-        const email = (tokenResponse.account?.username || '').toLowerCase();
-        const name = tokenResponse.account?.name || email;
+
+        // Extraction complète de l'email depuis tous les champs possibles renvoyés par Microsoft
+        const rawEmail = tokenResponse.account?.username ||
+                         tokenResponse.idTokenClaims?.preferred_username ||
+                         tokenResponse.idTokenClaims?.email ||
+                         tokenResponse.idTokenClaims?.upn ||
+                         tokenResponse.account?.name ||
+                         '';
+
+        const email = rawEmail.trim().toLowerCase();
+        const name = tokenResponse.account?.name ||
+                     tokenResponse.idTokenClaims?.name ||
+                     (email ? email.split('@')[0] : 'Utilisateur');
+
+        // Attribution du rôle selon le domaine ou par défaut
         const role = resolveRoleFromEmail(email);
 
-        if (!role) {
-            console.warn(`Connexion refusée pour ${email} (domaine non autorisé).`);
-            return res.redirect('/connexion?ssoError=domain');
-        }
+        console.log(`🔑 Connexion SSO Microsoft réussie : ${email} (${name}) → Rôle : ${role}`);
 
-        req.session.chatUser = { email, name, role };
+        req.session.chatUser = { email: email || 'utilisateur@microsoft.com', name, role };
         res.redirect('/');
     } catch (err) {
         console.error('Erreur lors de l\'échange du code SSO:', err);
@@ -569,6 +623,66 @@ app.get('/api/stats', requireStatsAuthApi, (req, res) => {
             nonCompliantRate: nonCompliantRateGlobal,
             uniqueUsers: uniqueUserIds ? uniqueUserIds.length : 0,
         }
+    });
+});
+
+// Route liste des fichiers indexés
+app.get('/api/stats/files', requireStatsAuthApi, (req, res) => {
+    const cache = loadCache();
+    const documents = cache.documents || [];
+    const fileEntries = Object.entries(cache.files || {}).map(([filePath, lastModified]) => {
+        const parts = filePath.split('/');
+        const fileName = parts.pop();
+        const folder = parts.pop() || '';
+        const meta = (cache.fileMeta && cache.fileMeta[filePath]) || {};
+        const chunks = documents.filter(d => d.source === filePath);
+        const textLength = chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
+        const size = (typeof meta.size === 'number' && meta.size > 0) ? meta.size : (textLength > 0 ? textLength : 1024);
+        return {
+            fileName,
+            folder,
+            fullPath: filePath,
+            lastModified: typeof lastModified === 'string' ? lastModified : (meta.lastModified || new Date().toISOString()),
+            size,
+            chunksCount: chunks.length
+        };
+    });
+    fileEntries.sort((a, b) => a.fileName.localeCompare(b.fileName, 'fr'));
+    const totalSize = fileEntries.reduce((acc, f) => acc + (f.size || 0), 0);
+    const totalChunks = fileEntries.reduce((acc, f) => acc + (f.chunksCount || 0), 0);
+    res.json({ files: fileEntries, total: fileEntries.length, totalSize, totalChunks });
+});
+
+// Route contenu d'un fichier pour visualisation
+app.get('/api/stats/file-content', requireStatsAuthApi, (req, res) => {
+    const filePath = req.query.path;
+    if (!filePath) return res.status(400).json({ error: 'Paramètre path manquant' });
+
+    const cache = loadCache();
+    const documents = cache.documents || [];
+    const chunks = documents.filter(d => d.source === filePath);
+    const meta = (cache.fileMeta && cache.fileMeta[filePath]) || {};
+    const parts = filePath.split('/');
+    const fileName = parts.pop();
+    const folder = parts.pop() || '';
+    const lastModified = cache.files?.[filePath] || meta.lastModified;
+
+    const textLength = chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
+    const size = (typeof meta.size === 'number' && meta.size > 0) ? meta.size : textLength;
+
+    res.json({
+        fileName,
+        folder,
+        fullPath: filePath,
+        size,
+        lastModified,
+        chunksCount: chunks.length,
+        chunks: chunks.map((c, idx) => ({
+            index: idx + 1,
+            text: c.text,
+            length: c.text ? c.text.length : 0
+        })),
+        fullText: chunks.map(c => c.text).join('\n\n')
     });
 });
 
