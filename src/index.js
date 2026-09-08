@@ -32,6 +32,10 @@ adapter.onTurnError = async (context, error) => {
 };
 
 const app = express();
+// L'application tourne derrière un reverse proxy HTTPS en production
+// (https://bot-teams.campus-pays-de-la-loire.fr). Sans ceci, req.protocol renvoie "http"
+// et les URL de redirection SSO générées seraient invalides.
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(session({
     secret: process.env.SESSION_SECRET,
@@ -431,11 +435,19 @@ function requireChatAuthApi(req, res, next) {
     return res.status(401).json({ error: 'Connexion Microsoft requise' });
 }
 
+// URL de retour envoyée à Microsoft. Déduite du domaine réellement utilisé pour la requête,
+// pour rester valide en local (localhost:3978) comme en production. SSO_REDIRECT_URI permet
+// de forcer une valeur si nécessaire. L'URI doit être déclarée à l'identique dans
+// Azure Portal > App Registration > Authentification > URI de redirection (type Web).
+function getSsoRedirectUri(req) {
+    return process.env.SSO_REDIRECT_URI || `${req.protocol}://${req.get('host')}/auth/callback`;
+}
+
 app.get('/auth/login', async (req, res) => {
     try {
         const state = crypto.randomBytes(16).toString('hex');
         req.session.authState = state;
-        const authUrl = await getAuthCodeUrl(state);
+        const authUrl = await getAuthCodeUrl(state, getSsoRedirectUri(req));
         res.redirect(authUrl);
     } catch (err) {
         console.error('Erreur lors de la génération de l\'URL de connexion Microsoft:', err);
@@ -457,7 +469,7 @@ app.get('/auth/callback', async (req, res) => {
     delete req.session.authState;
 
     try {
-        const tokenResponse = await acquireTokenByCode(code);
+        const tokenResponse = await acquireTokenByCode(code, getSsoRedirectUri(req));
 
         // Extraction complète de l'email depuis tous les champs possibles renvoyés par Microsoft
         const rawEmail = tokenResponse.account?.username ||

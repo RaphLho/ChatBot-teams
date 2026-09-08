@@ -10,6 +10,14 @@ services:
       - MICROSOFT_APP_ID=${MICROSOFT_APP_ID}
       - MICROSOFT_APP_PASSWORD=${MICROSOFT_APP_PASSWORD}
       - MICROSOFT_APP_TENANT_ID=${MICROSOFT_APP_TENANT_ID}
+      # SSO : laisser SSO_REDIRECT_URI vide pour que l'URL de retour soit déduite du domaine
+      # utilisé par le navigateur (indispensable en production derrière le reverse proxy).
+      - SSO_REDIRECT_URI=${SSO_REDIRECT_URI}
+      - STUDENT_EMAIL_DOMAINS=${STUDENT_EMAIL_DOMAINS}
+      - COLLABORATOR_EMAIL_DOMAINS=${COLLABORATOR_EMAIL_DOMAINS}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - ID_STATS=${ID_STATS}
+      - MDP_STATS=${MDP_STATS}
       - REDIS_URL=redis://redis:6379
       - CHROMA_URL=http://chromadb:8000
     depends_on:

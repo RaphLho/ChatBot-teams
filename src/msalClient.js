@@ -15,19 +15,23 @@ const msalClient = new ConfidentialClientApplication({
 
 const SCOPES = ['openid', 'profile', 'email'];
 
-export function getAuthCodeUrl(state) {
+// Le redirectUri est fourni par l'appelant (déduit de la requête entrante) afin que le même
+// code fonctionne en local et derrière le nom de domaine public, sans dépendre d'une variable
+// d'environnement à tenir à jour sur chaque environnement. SSO_REDIRECT_URI reste prioritaire
+// si elle est définie, pour forcer une URL précise si besoin.
+export function getAuthCodeUrl(state, redirectUri) {
     return msalClient.getAuthCodeUrl({
         scopes: SCOPES,
-        redirectUri: process.env.SSO_REDIRECT_URI,
+        redirectUri,
         state,
     });
 }
 
-export function acquireTokenByCode(code) {
+export function acquireTokenByCode(code, redirectUri) {
     return msalClient.acquireTokenByCode({
         code,
         scopes: SCOPES,
-        redirectUri: process.env.SSO_REDIRECT_URI,
+        redirectUri,
     });
 }
 
