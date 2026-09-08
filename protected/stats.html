@@ -161,12 +161,28 @@
                                 <span><span id="files-chunks-count">0</span> blocs vectoriels générés • Cliquez sur un fichier pour visualiser son contenu</span>
                             </div>
                         </div>
-                        <button class="files-toggle-btn" id="files-toggle-btn" type="button">
-                            Voir les fichiers
-                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="6 9 12 15 18 9"/>
-                            </svg>
-                        </button>
+                        <div class="files-header-actions">
+                            <button class="files-toggle-btn" id="onedrive-open-btn" type="button" title="Ouvrir le dossier des documents de l'IA sur OneDrive">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/>
+                                </svg>
+                                OneDrive
+                            </button>
+                            <button class="files-toggle-btn" id="rag-refresh-btn" type="button" title="Actualiser la base RAG pour prendre en compte les nouveaux documents">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
+                                Actualiser le RAG
+                            </button>
+                            <button class="files-toggle-btn" id="files-toggle-btn" type="button">
+                                Voir les fichiers
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="files-list" id="files-list">
                         <table class="files-table">
@@ -534,6 +550,30 @@
                 <div id="file-content-viewer" class="file-content-viewer">
                     <div style="text-align:center; padding: 40px; color: var(--text-secondary);">Chargement du document...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RAG Refresh Terminal Modal -->
+    <div id="rag-terminal-modal" class="modal" style="display: none;">
+        <div class="modal-content rag-terminal-content">
+            <div class="modal-header">
+                <div class="rag-terminal-title-wrap">
+                    <span class="rag-terminal-status-dot" id="rag-terminal-status-dot"></span>
+                    <h2>Actualisation de la base RAG</h2>
+                </div>
+                <span class="close-modal close-rag-terminal-modal">&times;</span>
+            </div>
+            <div class="modal-body rag-terminal-body">
+                <div class="rag-terminal" id="rag-terminal-output"></div>
+                <div class="rag-terminal-files" id="rag-terminal-files" hidden>
+                    <h3>Nouveaux fichiers détectés</h3>
+                    <ul id="rag-terminal-files-list"></ul>
+                </div>
+            </div>
+            <div class="modal-footer rag-terminal-footer">
+                <span class="rag-terminal-hint" id="rag-terminal-hint">Actualisation en cours...</span>
+                <button type="button" class="secondary-btn" id="rag-terminal-close-btn" style="width:auto;">Fermer</button>
             </div>
         </div>
     </div>

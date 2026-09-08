@@ -14,7 +14,7 @@ const xlsx = require('xlsx');
 import { Mistral } from '@mistralai/mistralai';
 import RAGBot from './bot.js';
 import botStats, { recordUsage, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount } from './stats.js';
-import { listOneDriveFiles, downloadFilesBuffers } from './onedriveClient.js';
+import { listOneDriveFiles, downloadFilesBuffers, getOneDriveFolderUrl } from './onedriveClient.js';
 import { loadCache, saveCache } from './cacheManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,14 +78,17 @@ class LocalRamVectorStore {
         this.documents = [];
     }
 
-    async addDocuments(chunks) {
-        console.log(`   ↳ Envoi de ${chunks.length} blocs à Mistral pour embedding...`);
+    async addDocuments(chunks, onProgress = () => {}) {
+        const log = (msg) => { console.log(msg); onProgress({ type: 'log', message: msg }); };
+        log(`   ↳ Envoi de ${chunks.length} blocs à Mistral pour embedding...`);
         const batchSize = 32;
         const delayBetweenBatches = 500; // ms entre chaque batch
         const maxRetries = 3;
+        const totalBatches = Math.ceil(chunks.length / batchSize);
 
         for (let i = 0; i < chunks.length; i += batchSize) {
             const batch = chunks.slice(i, i + batchSize);
+            const batchNum = Math.floor(i / batchSize) + 1;
             let retries = 0;
             let success = false;
 
@@ -93,7 +96,7 @@ class LocalRamVectorStore {
                 try {
                     if (retries > 0) {
                         const backoff = Math.pow(2, retries) * 1000; // 2s, 4s, 8s
-                        console.log(`   ⏳ Retry ${retries}/${maxRetries} dans ${backoff / 1000}s (rate limit)...`);
+                        log(`   ⏳ Retry ${retries}/${maxRetries} dans ${backoff / 1000}s (rate limit)...`);
                         await new Promise(r => setTimeout(r, backoff));
                     }
 
@@ -114,6 +117,7 @@ class LocalRamVectorStore {
                         recordUsage(embTk, 0, 'embedding_indexation', '', '', false, null, 'mistral-embed');
                     }
                     success = true;
+                    log(`   ✓ Bloc ${batchNum}/${totalBatches} vectorisé (${batch.length} chunks)`);
                 } catch (err) {
                     if (err.statusCode === 429 && retries < maxRetries) {
                         retries++;
@@ -241,9 +245,10 @@ async function extractTextFromBuffer(buffer, ext) {
 let vectorStore = null;
 let bot_instance = null;
 
-async function initKnowledgeBase(mistralClient) {
-    console.log("------------------------------------------");
-    console.log("🔄 Indexation des documents en cours...");
+async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
+    const log = (msg) => { console.log(msg); onProgress({ type: 'log', message: msg }); };
+    log("------------------------------------------");
+    log("🔄 Indexation des documents en cours...");
 
     const cache = loadCache();
     let remoteFiles;
@@ -251,20 +256,22 @@ async function initKnowledgeBase(mistralClient) {
         remoteFiles = await listOneDriveFiles();
     } catch (err) {
         console.error("❌ Erreur de connexion OneDrive:", err.message);
+        onProgress({ type: 'log', message: `❌ Erreur de connexion OneDrive: ${err.message}` });
         if (cache.documents.length > 0) {
-            console.log("⚠️  Utilisation du cache local de la base de connaissance.");
+            log("⚠️  Utilisation du cache local de la base de connaissance.");
             const store = new LocalRamVectorStore(mistralClient);
             store.documents = cache.documents;
             botStats.totalChunksIndexed = cache.documents.length;
             botStats.totalFilesParsed = Object.keys(cache.files).length;
             return store;
         }
-        console.log("⚠️  Le bot démarrera sans base de connaissance.");
+        log("⚠️  Le bot démarrera sans base de connaissance.");
         return null;
     }
 
     if (!remoteFiles || remoteFiles.length === 0) {
-        console.log("⚠️  Aucun document trouvé. Le bot fonctionnera sans base de cours.");
+        log("⚠️  Aucun document trouvé. Le bot fonctionnera sans base de cours.");
+        onProgress({ type: 'files', files: [] });
         return null;
     }
 
@@ -287,13 +294,15 @@ async function initKnowledgeBase(mistralClient) {
     }
 
     const pathsToRemove = Object.keys(cache.files).filter(p => !currentRemotePaths.has(p));
-    
+
+    onProgress({ type: 'files', files: filesToDownload.map(f => f.name) });
+
     let newChunks = [];
     if (filesToDownload.length > 0) {
-        console.log(`🔄 ${filesToDownload.length} fichier(s) à télécharger/mettre à jour.`);
+        log(`🔄 ${filesToDownload.length} fichier(s) à télécharger/mettre à jour.`);
         const downloadedDocs = await downloadFilesBuffers(filesToDownload);
         for (const doc of downloadedDocs) {
-            console.log(`📄 Traitement : ${doc.name}`);
+            log(`📄 Traitement : ${doc.name}`);
             try {
                 const extracted = await extractTextFromBuffer(doc.buffer, doc.ext);
                 // CSV/Excel arrivent déjà découpés (en-tête répétée dans chaque bloc, voir
@@ -305,28 +314,29 @@ async function initKnowledgeBase(mistralClient) {
                 if (chunks.length > 0) {
                     chunks.forEach(c => newChunks.push({ text: c, source: doc.fullPath }));
                 } else {
-                    console.log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
+                    log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
                 }
                 const remoteFile = filesToDownload.find(f => f.fullPath === doc.fullPath);
                 if (remoteFile) cache.files[doc.fullPath] = remoteFile.lastModified;
             } catch (e) {
                 console.error(`   ❌ Impossible de lire ${doc.name}:`, e.message);
+                onProgress({ type: 'log', message: `   ❌ Impossible de lire ${doc.name}: ${e.message}` });
             }
         }
     } else {
-        console.log(`✅ Tous les fichiers sont à jour. Aucun téléchargement nécessaire.`);
+        log(`✅ Tous les fichiers sont à jour. Aucun téléchargement nécessaire.`);
     }
 
     const store = new LocalRamVectorStore(mistralClient);
-    
-    let updatedDocuments = cache.documents.filter(doc => 
-        !pathsToRemove.includes(doc.source) && 
+
+    let updatedDocuments = cache.documents.filter(doc =>
+        !pathsToRemove.includes(doc.source) &&
         !filesToDownload.some(f => f.fullPath === doc.source)
     );
 
     if (newChunks.length > 0) {
-        await store.addDocuments(newChunks);
-        console.log(`✅ ${newChunks.length} blocs indexés !`);
+        await store.addDocuments(newChunks, onProgress);
+        log(`✅ ${newChunks.length} blocs indexés !`);
         updatedDocuments = updatedDocuments.concat(store.documents);
     }
 
@@ -698,6 +708,17 @@ app.get('/api/stats/file-content', requireStatsAuthApi, (req, res) => {
     });
 });
 
+// Route lien OneDrive du dossier de documents indexés (bouton "OneDrive" de la page stats)
+app.get('/api/stats/onedrive-link', requireStatsAuthApi, async (req, res) => {
+    try {
+        const url = await getOneDriveFolderUrl();
+        res.json({ url });
+    } catch (err) {
+        console.error('Erreur récupération lien OneDrive:', err.message);
+        res.status(500).json({ error: "Impossible de récupérer le lien du dossier OneDrive." });
+    }
+});
+
 // Route Historique détaillé
 app.get('/api/stats/history', requireStatsAuthApi, (req, res) => {
     const hourly = aggregateHistory('hour');
@@ -719,18 +740,50 @@ app.get('/api/stats/history', requireStatsAuthApi, (req, res) => {
 let isRefreshing = false;
 let mistralGlobal = null;
 
-async function refreshKnowledgeBase() {
-    if (isRefreshing || !mistralGlobal) return;
+// --- DIFFUSION TEMPS REEL DE LA PROGRESSION (SSE) ---
+// Utilisé par le bouton "Actualiser le RAG" de la page stats : la popup terminal ouvre une
+// connexion Server-Sent Events pour recevoir en direct les lignes de log de l'indexation,
+// pendant que la requête POST /api/refresh déclenche l'actualisation elle-même.
+let sseClients = [];
+
+function broadcastEvent(event) {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    sseClients.forEach(res => {
+        try { res.write(payload); } catch (e) { /* client déconnecté */ }
+    });
+}
+
+app.get('/api/refresh/stream', requireStatsAuthApi, (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.write(': connecté\n\n');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    sseClients.push(res);
+
+    req.on('close', () => {
+        sseClients = sseClients.filter(client => client !== res);
+    });
+});
+
+async function refreshKnowledgeBase(onProgress = () => {}) {
+    if (isRefreshing || !mistralGlobal) {
+        onProgress({ type: 'error', message: "Une actualisation est déjà en cours ou le bot n'est pas encore initialisé." });
+        return;
+    }
     isRefreshing = true;
     try {
-        console.log("\n⏱️ Actualisation automatique de la base de connaissance OneDrive...");
-        const newStore = await initKnowledgeBase(mistralGlobal);
+        onProgress({ type: 'log', message: "⏱️ Actualisation manuelle de la base de connaissance OneDrive..." });
+        const newStore = await initKnowledgeBase(mistralGlobal, onProgress);
         if (newStore && bot_instance) {
             bot_instance.vectorStore = newStore;
-            console.log("🔄 Base de connaissance mise à jour avec succès en mémoire (sans redémarrer le bot) !");
+            onProgress({ type: 'log', message: "🔄 Base de connaissance mise à jour avec succès en mémoire (sans redémarrer le bot) !" });
         }
+        onProgress({ type: 'done', message: "Actualisation terminée." });
     } catch (e) {
-         console.error("❌ Erreur lors de l'actualisation automatique:", e);
+        console.error("❌ Erreur lors de l'actualisation automatique:", e);
+        onProgress({ type: 'error', message: `Erreur lors de l'actualisation : ${e.message}` });
     } finally {
         isRefreshing = false;
     }
@@ -748,10 +801,10 @@ app.listen(PORT, async () => {
     vectorStore = await initKnowledgeBase(mistralGlobal);
     bot_instance = new RAGBot(vectorStore, mistralGlobal);
 
-    // Route permettant d'actualiser manuellement (ex: via un bouton ou Postman)
-    app.post('/api/refresh', async (req, res) => {
+    // Route permettant d'actualiser manuellement (ex: via le bouton de la page stats ou Postman)
+    app.post('/api/refresh', requireStatsAuthApi, async (req, res) => {
         if (isRefreshing) return res.status(429).json({ status: "Déjà en cours d'actualisation" });
-        await refreshKnowledgeBase();
+        await refreshKnowledgeBase(broadcastEvent);
         res.json({ status: "Base de connaissances mise à jour avec succès !" });
     });
 

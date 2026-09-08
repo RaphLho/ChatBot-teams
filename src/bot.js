@@ -13,6 +13,51 @@ const responseCache = new Map();
 // qu'il ne fasse un lien artificiel avec le sujet précédent. Valeur à ajuster empiriquement si besoin.
 const TOPIC_SIMILARITY_THRESHOLD = 0.55;
 
+// --- Retry avec backoff exponentiel pour les appels Mistral ---
+// Nombre max de tentatives (1 initiale + 2 retries)
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2000; // 2s, 4s, 8s
+
+/**
+ * Exécute `fn` et retente automatiquement en cas de 429 (rate limit).
+ * Si le header x-ratelimit-limit-req-minute vaut "0", le quota est épuisé :
+ * on ne retente pas et on lance immédiatement une erreur explicite.
+ */
+async function callWithRetry(fn, label = 'Mistral API') {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isRateLimit = error.statusCode === 429 ||
+                                error.status === 429 ||
+                                error.message?.includes('429') ||
+                                error.message?.includes('rate_limited') ||
+                                error.message?.includes('Rate limit');
+
+            if (!isRateLimit) throw error; // Erreur non liée au rate limit → on propage
+
+            // Vérifier si le quota est à 0 (pas la peine de retenter)
+            const limitHeader = error.headers?.get?.('x-ratelimit-limit-req-minute')
+                             || error.rawResponse?.headers?.get?.('x-ratelimit-limit-req-minute');
+            if (limitHeader === '0') {
+                const quotaError = new Error('QUOTA_EXHAUSTED');
+                quotaError.statusCode = 429;
+                quotaError.isQuotaExhausted = true;
+                throw quotaError;
+            }
+
+            if (attempt === MAX_RETRIES) {
+                console.error(`⛔ ${label} : échec après ${MAX_RETRIES} tentatives (429)`);
+                throw error;
+            }
+
+            const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+            console.warn(`⏳ ${label} : 429 reçu, tentative ${attempt}/${MAX_RETRIES}. Retry dans ${delay / 1000}s…`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
+
 function formatDateFR(date) {
     return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
@@ -201,7 +246,11 @@ class RAGBot extends ActivityHandler {
                 await context.sendActivity(finalAnswer);
             } catch (error) {
                 console.error("Erreur lors du traitement:", error.message);
-                if (error.message?.includes('401') || error.message?.includes('API key')) {
+                if (error.isQuotaExhausted) {
+                    await context.sendActivity("⛔ Le quota de l'API Mistral est épuisé (0 requête/minute autorisée). Vérifiez votre abonnement sur console.mistral.ai.");
+                } else if (error.statusCode === 429 || error.message?.includes('429') || error.message?.includes('Rate limit')) {
+                    await context.sendActivity("⏳ L'API Mistral est temporairement surchargée (rate limit). Réessayez dans quelques instants.");
+                } else if (error.message?.includes('401') || error.message?.includes('API key')) {
                     await context.sendActivity("❌ Clé API Mistral invalide. Vérifiez le fichier .env");
                 } else {
                     await context.sendActivity("⚠️ Service temporairement indisponible. Réessayez dans quelques instants.");
@@ -296,12 +345,15 @@ class RAGBot extends ActivityHandler {
 
         messages.push({ role: 'user', content: userPrompt });
 
-        // 4. Appel à Mistral
+        // 4. Appel à Mistral (avec retry automatique sur 429)
         const requestStartTime = Date.now();
-        const chatResponse = await this.mistralClient.chat.complete({
-            model: 'mistral-small-latest',
-            messages: messages
-        });
+        const chatResponse = await callWithRetry(
+            () => this.mistralClient.chat.complete({
+                model: 'mistral-small-latest',
+                messages: messages
+            }),
+            'chat.complete'
+        );
         const responseTimeMs = Date.now() - requestStartTime;
 
         let finalAnswer = chatResponse.choices[0].message.content;
@@ -351,10 +403,13 @@ class RAGBot extends ActivityHandler {
      */
     async _isRelatedToPrevious(currentQuestion, previousQuestion) {
         try {
-            const response = await this.mistralClient.embeddings.create({
-                model: 'mistral-embed',
-                inputs: [currentQuestion, previousQuestion],
-            });
+            const response = await callWithRetry(
+                () => this.mistralClient.embeddings.create({
+                    model: 'mistral-embed',
+                    inputs: [currentQuestion, previousQuestion],
+                }),
+                'embeddings.create'
+            );
             if (response.usage) {
                 const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
                 recordUsage(embTk, 0, 'embedding_topic_check', '', '', false, null, 'mistral-embed');

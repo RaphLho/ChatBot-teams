@@ -168,10 +168,15 @@ form.addEventListener('submit', async (e) => {
 });
 
 // Submit on Enter (Shift+Enter for newline)
+// Note : on utilise form.requestSubmit() plutôt que form.dispatchEvent(new Event('submit')).
+// Un Event('submit') créé manuellement n'est pas "cancelable" par défaut : sur Firefox,
+// preventDefault() n'a alors aucun effet et le navigateur effectue une vraie soumission
+// native du formulaire (rechargement de page, message jamais envoyé à /api/chat).
+// requestSubmit() déclenche un événement 'submit' natif et correctement annulable.
 messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        form.dispatchEvent(new Event('submit'));
+        form.requestSubmit();
     }
 });
 
@@ -200,15 +205,7 @@ async function renderStatsNavSlot() {
                 Statistiques
             </a>`;
     } else {
-        slot.innerHTML = `
-            <a href="/login" class="nav-tab" id="nav-login" style="text-decoration: none; color: inherit;">
-                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-                    <polyline points="10 17 15 12 10 7"/>
-                    <line x1="15" y1="12" x2="3" y2="12"/>
-                </svg>
-                Connexion
-            </a>`;
+        slot.innerHTML = '';
     }
 }
 

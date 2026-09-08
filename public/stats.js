@@ -964,6 +964,168 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================
+// OneDrive Link Button
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    const onedriveBtn = document.getElementById('onedrive-open-btn');
+
+    if (onedriveBtn) {
+        onedriveBtn.addEventListener('click', async () => {
+            onedriveBtn.disabled = true;
+            try {
+                const res = await fetch('/api/stats/onedrive-link');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+                window.open(data.url, '_blank', 'noopener');
+            } catch (err) {
+                console.error('Erreur ouverture OneDrive:', err);
+                alert("Impossible d'ouvrir le dossier OneDrive : " + err.message);
+            } finally {
+                onedriveBtn.disabled = false;
+            }
+        });
+    }
+});
+
+// ============================================
+// RAG Refresh Button — popup terminal + liste des nouveaux fichiers
+// ============================================
+// L'actualisation (téléchargement OneDrive + extraction + embeddings) peut prendre plusieurs
+// dizaines de secondes. On ouvre une popup "terminal" qui affiche en direct la progression via
+// Server-Sent Events (/api/refresh/stream), pendant que la requête POST /api/refresh déclenche
+// réellement l'actualisation côté serveur.
+document.addEventListener('DOMContentLoaded', () => {
+    const ragBtn = document.getElementById('rag-refresh-btn');
+    const ragModal = document.getElementById('rag-terminal-modal');
+    const ragOutput = document.getElementById('rag-terminal-output');
+    const ragFilesWrap = document.getElementById('rag-terminal-files');
+    const ragFilesList = document.getElementById('rag-terminal-files-list');
+    const ragStatusDot = document.getElementById('rag-terminal-status-dot');
+    const ragHint = document.getElementById('rag-terminal-hint');
+    const ragCloseBtn = document.getElementById('rag-terminal-close-btn');
+    const ragCloseX = ragModal ? ragModal.querySelector('.close-rag-terminal-modal') : null;
+
+    if (!ragBtn || !ragModal) return;
+
+    let ragEventSource = null;
+
+    function appendRagLine(message, cls = '') {
+        const line = document.createElement('span');
+        line.className = `rag-terminal-line ${cls}`.trim();
+        line.textContent = message;
+        ragOutput.appendChild(line);
+        ragOutput.scrollTop = ragOutput.scrollHeight;
+    }
+
+    function setRagStatus(status) {
+        ragStatusDot.classList.remove('status-done', 'status-error');
+        if (status === 'done' || status === 'error') ragStatusDot.classList.add(`status-${status}`);
+    }
+
+    function stopRagRefresh() {
+        ragBtn.disabled = false;
+        ragBtn.classList.remove('loading');
+    }
+
+    function closeRagEventSource() {
+        if (ragEventSource) {
+            ragEventSource.close();
+            ragEventSource = null;
+        }
+    }
+
+    function closeRagModal() {
+        ragModal.style.display = 'none';
+        closeRagEventSource();
+    }
+
+    ragCloseBtn?.addEventListener('click', closeRagModal);
+    ragCloseX?.addEventListener('click', closeRagModal);
+    ragModal.addEventListener('click', (e) => {
+        if (e.target === ragModal) closeRagModal();
+    });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && ragModal.style.display !== 'none') closeRagModal();
+    });
+
+    ragBtn.addEventListener('click', () => {
+        ragOutput.innerHTML = '';
+        ragFilesList.innerHTML = '';
+        ragFilesWrap.hidden = true;
+        setRagStatus('running');
+        ragHint.textContent = 'Actualisation en cours...';
+        ragModal.style.display = 'flex';
+
+        ragBtn.disabled = true;
+        ragBtn.classList.add('loading');
+
+        closeRagEventSource();
+        ragEventSource = new EventSource('/api/refresh/stream');
+
+        ragEventSource.onmessage = (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch (err) { return; }
+
+            switch (data.type) {
+                case 'log':
+                    appendRagLine(data.message);
+                    break;
+                case 'files':
+                    if (data.files && data.files.length > 0) {
+                        ragFilesList.innerHTML = data.files.map(f => `<li>${escapeHtml(f)}</li>`).join('');
+                        ragFilesWrap.hidden = false;
+                    } else {
+                        ragFilesWrap.hidden = true;
+                    }
+                    break;
+                case 'done':
+                    appendRagLine(data.message, 'line-system');
+                    setRagStatus('done');
+                    ragHint.textContent = 'Terminé.';
+                    stopRagRefresh();
+                    closeRagEventSource();
+                    loadStats();
+                    break;
+                case 'error':
+                    appendRagLine(`❌ ${data.message}`, 'line-error');
+                    setRagStatus('error');
+                    ragHint.textContent = "Erreur lors de l'actualisation.";
+                    stopRagRefresh();
+                    closeRagEventSource();
+                    break;
+            }
+        };
+
+        ragEventSource.onerror = () => {
+            // Se déclenche aussi normalement quand closeRagEventSource() ferme la connexion
+            // après un événement 'done'/'error' : le navigateur peut émettre un dernier 'error'.
+            if (ragEventSource) {
+                appendRagLine('⚠️ Connexion au flux de progression interrompue.', 'line-error');
+            }
+        };
+
+        fetch('/api/refresh', { method: 'POST' })
+            .then(async (res) => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    appendRagLine(`❌ ${data.status || data.error || 'Erreur inconnue'}`, 'line-error');
+                    setRagStatus('error');
+                    ragHint.textContent = "Erreur lors de l'actualisation.";
+                    stopRagRefresh();
+                    closeRagEventSource();
+                }
+            })
+            .catch((err) => {
+                appendRagLine(`❌ Erreur réseau : ${err.message}`, 'line-error');
+                setRagStatus('error');
+                ragHint.textContent = "Erreur lors de l'actualisation.";
+                stopRagRefresh();
+                closeRagEventSource();
+            });
+    });
+});
+
+// ============================================
 // History Filter
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {

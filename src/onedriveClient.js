@@ -82,6 +82,23 @@ export async function listOneDriveFiles() {
     return files;
 }
 
+// Récupère l'URL web (webUrl) du dossier OneDrive indexé, pour un lien "Ouvrir dans OneDrive"
+// depuis la page de statistiques.
+export async function getOneDriveFolderUrl() {
+    const userEmail = process.env.ONEDRIVE_USER_EMAIL;
+    const folderPath = process.env.ONEDRIVE_FOLDER_PATH;
+
+    if (!userEmail || !folderPath) {
+        throw new Error('Variables ONEDRIVE_USER_EMAIL et ONEDRIVE_FOLDER_PATH manquantes dans .env');
+    }
+
+    const client = createGraphClient();
+    const item = await client
+        .api(`/users/${userEmail}/drive/root:/${folderPath}`)
+        .get();
+    return item.webUrl;
+}
+
 export async function downloadFilesBuffers(files) {
     const documents = [];
     for (const file of files) {
