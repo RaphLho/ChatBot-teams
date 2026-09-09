@@ -24,34 +24,45 @@ async function listFilesRecursive(client, userEmail, folderPath) {
     const allFiles = [];
 
     async function scanFolder(currentPath) {
-        let response;
-        try {
-            response = await client
-                .api(`/users/${userEmail}/drive/root:/${currentPath}:/children`)
-                .get();
-        } catch (err) {
-            console.error(`❌ Impossible de lister "${currentPath}" : ${err.message}`);
-            return;
-        }
+        // Graph pagine /children (200 éléments par page) : il faut suivre @odata.nextLink jusqu'au
+        // bout. Une page manquante donnerait une liste incomplète, donc la suppression des
+        // documents correspondants dans la base RAG.
+        let nextUrl = `/users/${userEmail}/drive/root:/${currentPath}:/children`;
 
-        for (const item of response.value) {
-            if (item.folder) {
-                await scanFolder(`${currentPath}/${item.name}`);
-            } else if (item.file) {
-                const ext = item.name.includes('.')
-                    ? item.name.substring(item.name.lastIndexOf('.')).toLowerCase()
-                    : '';
-                if (SUPPORTED_EXTENSIONS.includes(ext)) {
-                    allFiles.push({
-                        name: item.name,
-                        fullPath: `${currentPath}/${item.name}`,
-                        downloadUrl: item['@microsoft.graph.downloadUrl'],
-                        ext,
-                        size: item.size || 0,
-                        lastModified: item.lastModifiedDateTime
-                    });
+        while (nextUrl) {
+            let response;
+            try {
+                response = await client.api(nextUrl).get();
+            } catch (err) {
+                // On propage volontairement l'erreur au lieu de renvoyer une liste partielle : la
+                // liste retournée fait autorité pour purger la base RAG (tout fichier absent est
+                // supprimé). Un sous-dossier illisible produirait sinon la suppression silencieuse
+                // de tous ses documents sur un simple incident réseau.
+                console.error(`❌ Impossible de lister "${currentPath}" : ${err.message}`);
+                throw new Error(`Listing OneDrive incomplet sur "${currentPath}" : ${err.message}`);
+            }
+
+            for (const item of response.value) {
+                if (item.folder) {
+                    await scanFolder(`${currentPath}/${item.name}`);
+                } else if (item.file) {
+                    const ext = item.name.includes('.')
+                        ? item.name.substring(item.name.lastIndexOf('.')).toLowerCase()
+                        : '';
+                    if (SUPPORTED_EXTENSIONS.includes(ext)) {
+                        allFiles.push({
+                            name: item.name,
+                            fullPath: `${currentPath}/${item.name}`,
+                            downloadUrl: item['@microsoft.graph.downloadUrl'],
+                            ext,
+                            size: item.size || 0,
+                            lastModified: item.lastModifiedDateTime
+                        });
+                    }
                 }
             }
+
+            nextUrl = response['@odata.nextLink'] || null;
         }
     }
 

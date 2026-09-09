@@ -628,12 +628,22 @@ function updateFilesTable(files) {
         const sizeFormatted = formatBytes(file.size);
         const chunksCount = file.chunksCount || 0;
 
+        // Fil d'Ariane du sous-dossier réel (ex: "Etudiant › 01_Etudiant › B3CN"), affiché sous le
+        // nom du fichier pour qu'on voie immédiatement où il se trouve dans l'arborescence
+        // OneDrive, plutôt que seulement sa catégorie de premier niveau.
+        const dirCrumb = file.relativeDir
+            ? `<div class="file-path-crumb" title="${escapeHtml(file.relativeDir)}">${escapeHtml(file.relativeDir).split('/').join(' <span class="crumb-sep">›</span> ')}</div>`
+            : '';
+
         return `
             <tr class="file-row-clickable" data-path="${encodeURIComponent(file.fullPath)}">
                 <td>
                     <div class="file-name-cell">
                         <span class="file-ext-badge ${extClass}">${ext}</span>
-                        <span class="file-name-text" title="${file.fileName}">${file.fileName}</span>
+                        <div class="file-name-wrap">
+                            <span class="file-name-text" title="${file.fileName}">${file.fileName}</span>
+                            ${dirCrumb}
+                        </div>
                     </div>
                 </td>
                 <td><span class="folder-badge ${folderClass}">${folderLabel}</span></td>
@@ -1000,6 +1010,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const ragOutput = document.getElementById('rag-terminal-output');
     const ragFilesWrap = document.getElementById('rag-terminal-files');
     const ragFilesList = document.getElementById('rag-terminal-files-list');
+    const ragRemovedWrap = document.getElementById('rag-terminal-removed');
+    const ragRemovedList = document.getElementById('rag-terminal-removed-list');
     const ragStatusDot = document.getElementById('rag-terminal-status-dot');
     const ragHint = document.getElementById('rag-terminal-hint');
     const ragCloseBtn = document.getElementById('rag-terminal-close-btn');
@@ -1052,6 +1064,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ragOutput.innerHTML = '';
         ragFilesList.innerHTML = '';
         ragFilesWrap.hidden = true;
+        ragRemovedList.innerHTML = '';
+        ragRemovedWrap.hidden = true;
         setRagStatus('running');
         ragHint.textContent = 'Actualisation en cours...';
         ragModal.style.display = 'flex';
@@ -1076,6 +1090,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         ragFilesWrap.hidden = false;
                     } else {
                         ragFilesWrap.hidden = true;
+                    }
+                    break;
+                case 'removed':
+                    if (data.files && data.files.length > 0) {
+                        ragRemovedList.innerHTML = data.files.map(f => `<li>${escapeHtml(f)}</li>`).join('');
+                        ragRemovedWrap.hidden = false;
+                    } else {
+                        ragRemovedWrap.hidden = true;
                     }
                     break;
                 case 'done':

@@ -993,11 +993,32 @@ body {
     font-weight: 500;
 }
 
+.file-name-wrap {
+    min-width: 0;
+}
+
 .file-name-text {
+    display: block;
     max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.file-path-crumb {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.74rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.file-path-crumb .crumb-sep {
+    opacity: 0.5;
+    margin: 0 1px;
 }
 
 .file-ext-badge {
@@ -2351,6 +2372,15 @@ body {
 .rag-terminal-files li::before {
     content: '📄';
     font-size: 0.8rem;
+}
+
+.rag-terminal-removed li {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+
+.rag-terminal-removed li::before {
+    content: '🗑️';
 }
 
 .rag-terminal-footer {

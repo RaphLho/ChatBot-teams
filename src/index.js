@@ -258,7 +258,10 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
         console.error("❌ Erreur de connexion OneDrive:", err.message);
         onProgress({ type: 'log', message: `❌ Erreur de connexion OneDrive: ${err.message}` });
         if (cache.documents.length > 0) {
-            log("⚠️  Utilisation du cache local de la base de connaissance.");
+            // Repli volontaire : sans cette conservation, une simple coupure réseau viderait la
+            // base de connaissance. Le cache ne contient que des documents issus du OneDrive, mais
+            // il peut être en retard sur une suppression récente : relancer l'actualisation.
+            log("⚠️  OneDrive injoignable : conservation temporaire du cache local (aucune purge possible).");
             const store = new LocalRamVectorStore(mistralClient);
             store.documents = cache.documents;
             botStats.totalChunksIndexed = cache.documents.length;
@@ -269,10 +272,12 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
         return null;
     }
 
-    if (!remoteFiles || remoteFiles.length === 0) {
-        log("⚠️  Aucun document trouvé. Le bot fonctionnera sans base de cours.");
-        onProgress({ type: 'files', files: [] });
-        return null;
+    // Un OneDrive vide n'est pas une erreur : on poursuit pour purger la base RAG de tous les
+    // documents devenus obsolètes (sans ce passage, le bot continuerait de répondre à partir de
+    // fichiers qui n'existent plus et la page de statistiques continuerait de les lister).
+    if (!remoteFiles) remoteFiles = [];
+    if (remoteFiles.length === 0) {
+        log("⚠️  Aucun document trouvé dans le OneDrive : la base de connaissance va être vidée.");
     }
 
     const filesToDownload = [];
@@ -293,9 +298,23 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
         }
     }
 
-    const pathsToRemove = Object.keys(cache.files).filter(p => !currentRemotePaths.has(p));
+    // Tout ce qui est connu localement (fichiers indexés, métadonnées, sources des blocs déjà
+    // vectorisés) et qui n'est plus présent dans le OneDrive doit disparaître. On balaye les trois
+    // origines : un bloc peut avoir une source absente de cache.files (indexation interrompue,
+    // cache issu d'une version antérieure), et resterait alors indéfiniment dans la base.
+    const pathsToRemove = [...new Set([
+        ...Object.keys(cache.files),
+        ...Object.keys(cache.fileMeta),
+        ...cache.documents.map(d => d.source),
+    ])].filter(p => p && !currentRemotePaths.has(p));
+
+    if (pathsToRemove.length > 0) {
+        log(`🗑️  ${pathsToRemove.length} fichier(s) absent(s) du OneDrive → retiré(s) de la base RAG.`);
+        pathsToRemove.forEach(p => log(`   − ${p.split('/').pop()}`));
+    }
 
     onProgress({ type: 'files', files: filesToDownload.map(f => f.name) });
+    onProgress({ type: 'removed', files: pathsToRemove.map(p => p.split('/').pop()) });
 
     let newChunks = [];
     if (filesToDownload.length > 0) {
@@ -329,8 +348,11 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
 
     const store = new LocalRamVectorStore(mistralClient);
 
+    // Filtrage POSITIF sur les chemins réellement présents dans le OneDrive : un bloc n'est
+    // conservé que si son fichier source existe encore en ligne et n'a pas changé (les fichiers
+    // modifiés viennent d'être re-vectorisés dans newChunks).
     let updatedDocuments = cache.documents.filter(doc =>
-        !pathsToRemove.includes(doc.source) &&
+        currentRemotePaths.has(doc.source) &&
         !filesToDownload.some(f => f.fullPath === doc.source)
     );
 
@@ -342,7 +364,7 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
 
     for (const p of pathsToRemove) {
         delete cache.files[p];
-        if (cache.fileMeta) delete cache.fileMeta[p];
+        delete cache.fileMeta[p];
     }
 
     store.documents = updatedDocuments;
@@ -351,6 +373,8 @@ async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
 
     botStats.totalChunksIndexed = updatedDocuments.length;
     botStats.totalFilesParsed = Object.keys(cache.files).length;
+
+    log(`📚 Base RAG à jour : ${botStats.totalFilesParsed} fichier(s), ${updatedDocuments.length} bloc(s).`);
 
     return store;
 }
@@ -648,6 +672,10 @@ app.get('/api/stats', requireStatsAuthApi, (req, res) => {
     });
 });
 
+// Racine du dossier indexé (ex: "Document IA Teams"), retirée de l'affichage : elle est
+// identique pour tous les documents et n'apporte aucune information de localisation.
+const ONEDRIVE_ROOT_PREFIX = `${process.env.ONEDRIVE_FOLDER_PATH || ''}/`;
+
 // Route liste des fichiers indexés
 app.get('/api/stats/files', requireStatsAuthApi, (req, res) => {
     const cache = loadCache();
@@ -656,6 +684,15 @@ app.get('/api/stats/files', requireStatsAuthApi, (req, res) => {
         const parts = filePath.split('/');
         const fileName = parts.pop();
         const folder = parts.pop() || '';
+
+        // Chemin des sous-dossiers menant au fichier, sans la racine OneDrive (constante) ni le
+        // nom du fichier : ex. "Etudiant/01_Etudiant/B3CN" pour un PDF profondément imbriqué.
+        // Sert à afficher où se trouve réellement chaque document (cf. confusion possible entre
+        // le dossier "Collaborateur", qui ne contient aucun PDF, et "Etudiant", qui en contient).
+        const relativeDir = filePath.startsWith(ONEDRIVE_ROOT_PREFIX)
+            ? filePath.slice(ONEDRIVE_ROOT_PREFIX.length, filePath.length - fileName.length - 1)
+            : parts.join('/');
+
         const meta = (cache.fileMeta && cache.fileMeta[filePath]) || {};
         const chunks = documents.filter(d => d.source === filePath);
         const textLength = chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
@@ -663,13 +700,16 @@ app.get('/api/stats/files', requireStatsAuthApi, (req, res) => {
         return {
             fileName,
             folder,
+            relativeDir,
             fullPath: filePath,
             lastModified: typeof lastModified === 'string' ? lastModified : (meta.lastModified || new Date().toISOString()),
             size,
             chunksCount: chunks.length
         };
     });
-    fileEntries.sort((a, b) => a.fileName.localeCompare(b.fileName, 'fr'));
+    // Tri par emplacement (chemin complet) plutôt que par seul nom de fichier, pour regrouper
+    // visuellement les documents d'un même sous-dossier les uns à la suite des autres.
+    fileEntries.sort((a, b) => a.fullPath.localeCompare(b.fullPath, 'fr'));
     const totalSize = fileEntries.reduce((acc, f) => acc + (f.size || 0), 0);
     const totalChunks = fileEntries.reduce((acc, f) => acc + (f.chunksCount || 0), 0);
     res.json({ files: fileEntries, total: fileEntries.length, totalSize, totalChunks });
