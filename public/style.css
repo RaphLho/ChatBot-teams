@@ -152,6 +152,9 @@ body {
 
 .sidebar-content {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0; /* permet à .chat-history-list de scroller sans pousser le footer hors écran */
 }
 
 .sidebar-desc {
@@ -203,6 +206,264 @@ body {
 .secondary-btn:hover {
     background: var(--primary-light);
     border-color: #d4d4d8;
+}
+
+/* ============================================ */
+/* Historique des conversations (sidebar)        */
+/* ============================================ */
+.chat-history-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    margin-top: 20px;
+}
+
+.chat-history-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    flex-shrink: 0;
+}
+
+.chat-history-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 -8px;
+    padding: 0 8px;
+}
+
+.chat-history-empty {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.chat-history-item {
+    position: relative;
+    padding: 10px 30px 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.chat-history-item:hover {
+    background: white;
+    border-color: var(--border);
+}
+
+.chat-history-item.active {
+    background: white;
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+}
+
+.chat-history-item-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.chat-history-item-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-history-item-date {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.chat-history-item-preview {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 2px;
+}
+
+.chat-history-item-detail {
+    font-size: 0.72rem;
+    color: var(--primary);
+    opacity: 0.7;
+    margin-top: 3px;
+}
+
+.chat-history-delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.chat-history-item:hover .chat-history-delete-btn {
+    display: flex;
+}
+
+.chat-history-delete-btn:hover {
+    background: var(--accent-rose-light);
+    color: var(--accent-rose);
+}
+
+/* ============================================ */
+/* Popup de profil (nom, prénom, formation/rôle) */
+/* ============================================ */
+.profile-modal-content {
+    max-width: 440px !important;
+}
+
+.profile-modal-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 320px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+}
+
+.profile-list-empty {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-style: italic;
+    padding: 8px 0 16px;
+}
+
+.profile-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.profile-row:hover {
+    background: var(--primary-light);
+    border-color: #d4d4d8;
+}
+
+.profile-row-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.profile-row-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-row-detail {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.profile-delete-btn {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--accent-rose);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.profile-delete-btn:hover {
+    background: var(--accent-rose-light);
+    border-color: rgba(244, 63, 94, 0.25);
+}
+
+.profile-new-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.profile-field-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.profile-field-label input {
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    background: white;
+}
+
+.profile-field-label input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.profile-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.profile-submit-btn {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.profile-submit-btn:hover {
+    background: var(--primary-dark);
 }
 
 /* ============================================ */
@@ -1376,6 +1637,12 @@ body {
     width: 14px;
     height: 14px;
     flex-shrink: 0;
+}
+
+.history-entry-user-id {
+    opacity: 0.7;
+    font-weight: 400;
+    font-size: 0.85em;
 }
 
 .history-entry-user {

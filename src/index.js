@@ -603,20 +603,48 @@ app.post('/api/messages', async (req, res) => {
     await adapter.processActivity(req, res, (context) => bot_instance.run(context));
 });
 
+// Extrait un profil déclaré (nom/prénom + formation ou rôle) depuis le corps de la requête,
+// en ne conservant que les champs attendus, sous forme de chaîne courte : le contenu n'est
+// jamais utilisé comme instruction (cf. bot.js), mais on évite tout objet/valeur inattendue.
+function sanitizeIncomingProfile(rawProfile) {
+    if (!rawProfile || typeof rawProfile !== 'object') return null;
+    const toShortString = (v) => (typeof v === 'string' ? v.slice(0, 150) : '');
+    const profile = {
+        firstName: toShortString(rawProfile.firstName),
+        lastName: toShortString(rawProfile.lastName),
+        role: toShortString(rawProfile.role),
+        formation: toShortString(rawProfile.formation),
+    };
+    return (profile.firstName || profile.lastName) ? profile : null;
+}
+
 // Point d'entrée pour l'Interface Web
 app.post('/api/chat', requireChatAuthApi, async (req, res) => {
     if (!bot_instance) return res.status(503).json({ error: "Bot en cours d'initialisation..." });
     try {
         const { question, userId = "web_user" } = req.body;
         if (!question) return res.status(400).json({ error: "Question manquante" });
+        const safeUserId = typeof userId === 'string' ? userId.slice(0, 100) : 'web_user';
+        const profile = sanitizeIncomingProfile(req.body.profile);
         // Le mode est déterminé par le rôle déduit du domaine Microsoft de l'utilisateur connecté,
         // jamais par une valeur envoyée par le client.
         const validMode = req.session.chatUser.role;
-        const answer = await bot_instance.askQuestion(question, userId, validMode);
+        const answer = await bot_instance.askQuestion(question, safeUserId, validMode, profile);
         res.json({ answer });
     } catch (error) {
         console.error("Erreur Web API:", error);
-        res.status(500).json({ error: "Une erreur est survenue lors de la génération de la réponse." });
+        // Même classification que le bot Teams (cf. onMessage dans bot.js) : sans ça, l'utilisateur
+        // web recevait un message générique même quand la cause est un quota Mistral épuisé, un
+        // rate limit temporaire ou une clé API invalide — trois cas très différents à diagnostiquer.
+        let message = "⚠️ Service temporairement indisponible. Réessayez dans quelques instants.";
+        if (error.isQuotaExhausted) {
+            message = "⛔ Le quota de l'API Mistral est épuisé (0 requête/minute autorisée). Contactez l'administrateur du bot.";
+        } else if (error.statusCode === 429 || error.message?.includes('429') || error.message?.includes('Rate limit')) {
+            message = "⏳ L'API Mistral est temporairement surchargée (rate limit). Réessayez dans quelques instants.";
+        } else if (error.message?.includes('401') || error.message?.includes('API key')) {
+            message = "❌ Clé API Mistral invalide côté serveur. Contactez l'administrateur du bot.";
+        }
+        res.status(503).json({ error: message });
     }
 });
 

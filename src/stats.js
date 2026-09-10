@@ -110,8 +110,9 @@ const MAX_HISTORY = 1000;
  * @param {boolean} isNonCompliant - Vrai si la requête était hors sujet
  * @param {number|null} responseTimeMs - Temps de génération de la réponse par Mistral (ms), null si non mesuré
  * @param {string} model - Modèle utilisé ('mistral-small-latest' ou 'mistral-embed')
+ * @param {string} displayName - Nom déclaré par la personne (popup de profil côté web), vide si inconnu
  */
-function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest') {
+function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest', displayName = '') {
     const pTokens = promptTokens || 0;
     const cTokens = completionTokens || 0;
     const totalTk = pTokens + cTokens;
@@ -125,6 +126,7 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
         completionTokens: cTokens,
         totalTokens: totalTk,
         userId,
+        displayName: displayName || '',
         question,
         answer,
         isNonCompliant,
@@ -241,12 +243,15 @@ function getTopUsers(limit = 10) {
     for (const entry of botStats.history) {
         if (!isRealUser(entry.userId)) continue;
         if (!map.has(entry.userId)) {
-            map.set(entry.userId, { userId: entry.userId, totalTokens: 0, requests: 0, nonCompliant: 0 });
+            map.set(entry.userId, { userId: entry.userId, displayName: '', totalTokens: 0, requests: 0, nonCompliant: 0 });
         }
         const u = map.get(entry.userId);
         u.totalTokens += entry.totalTokens;
         u.requests += 1;
         if (entry.isNonCompliant) u.nonCompliant += 1;
+        // Conserve le nom déclaré le plus récent pour cet identifiant (peut être vide sur les
+        // toutes premières requêtes d'une conversation avant saisie du profil).
+        if (entry.displayName) u.displayName = entry.displayName;
     }
     return Array.from(map.values())
         .sort((a, b) => b.totalTokens - a.totalTokens)

@@ -259,7 +259,7 @@ function initTopUsersChart(topUsers) {
     if (topUsersChart) topUsersChart.destroy();
 
     const data = topUsers && topUsers.length > 0 ? topUsers : [];
-    const labels = data.map(u => truncateUserId(u.userId));
+    const labels = data.map(u => u.displayName || truncateUserId(u.userId));
 
     topUsersChart = new Chart(ctx, {
         type: 'bar',
@@ -283,7 +283,11 @@ function initTopUsersChart(topUsers) {
                 tooltip: {
                     ...commonChartOptions.plugins.tooltip,
                     callbacks: {
-                        title: (items) => data[items[0].dataIndex] ? data[items[0].dataIndex].userId : '',
+                        title: (items) => {
+                            const u = data[items[0].dataIndex];
+                            if (!u) return '';
+                            return u.displayName ? `${u.displayName} (${truncateUserId(u.userId)})` : u.userId;
+                        },
                         afterLabel: (item) => {
                             const u = data[item.dataIndex];
                             return u ? `${u.requests} requête(s) — ${u.nonCompliant} hors-sujet` : '';
@@ -817,6 +821,13 @@ function renderHistoryEntries(entries, filter) {
             ? `<span class="meta-item"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${formatResponseTime(entry.responseTimeMs)}</span>`
             : '';
 
+        // Nom déclaré par la personne (popup de profil côté web) : affiché en priorité, avec
+        // l'identifiant technique en infobulle pour la traçabilité. Repli sur l'identifiant seul
+        // si aucun profil n'a été renseigné (Teams, ou conversation "Invité").
+        const userLabel = entry.displayName
+            ? `${escapeHtml(entry.displayName)} <span class="history-entry-user-id">(${escapeHtml(truncateUserId(entry.userId || ''))})</span>`
+            : escapeHtml(entry.userId || 'inconnu');
+
         return `
             <div class="history-entry ${entry.isNonCompliant ? 'entry-noncompliant' : ''}"
                 data-question="${encodeURIComponent(entry.question || 'Pas de question')}"
@@ -826,9 +837,9 @@ function renderHistoryEntries(entries, filter) {
                         <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         ${formatTimestamp(entry.timestamp)}
                     </span>
-                    <span class="history-entry-user">${entry.userId || 'inconnu'}</span>
+                    <span class="history-entry-user" title="${escapeHtml(entry.userId || '')}">${userLabel}</span>
                 </div>
-                <div class="history-entry-question">${truncatedQuestion}</div>
+                <div class="history-entry-question">${escapeHtml(truncatedQuestion)}</div>
                 <div class="history-entry-meta">
                     <span class="model-badge ${modelClass}">${modelLabel}</span>
                     <span class="meta-separator"></span>

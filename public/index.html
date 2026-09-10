@@ -39,6 +39,12 @@
                     <span class="pulse"></span>
                     En ligne et prêt
                 </div>
+
+                <!-- Historique des conversations (stocké localement dans le navigateur) -->
+                <div class="chat-history-section">
+                    <div class="chat-history-header">Historique</div>
+                    <div class="chat-history-list" id="chat-history-list"></div>
+                </div>
             </div>
             <div class="sidebar-footer" style="display:flex; flex-direction:column; gap:12px;">
                 <button id="new-chat-btn" class="secondary-btn">Nouvelle conversation</button>
@@ -87,21 +93,44 @@
             </div>
         </main>
 
-        <!-- Modale de confirmation : nouvelle conversation -->
-        <div class="modal" id="new-chat-modal" style="display:none;">
-            <div class="modal-content" style="max-width:420px;">
+        <!-- Popup de profil : sélection ou création d'une identité en début de conversation -->
+        <div class="modal" id="profile-modal" style="display:none;">
+            <div class="modal-content profile-modal-content">
                 <div class="modal-header">
-                    <h2>Nouvelle conversation</h2>
-                    <span class="close-modal" id="new-chat-modal-close">&times;</span>
+                    <h2 id="profile-modal-title">Qui êtes-vous ?</h2>
+                    <span class="close-modal" id="profile-modal-close">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <p style="margin:0; color:var(--text-primary); line-height:1.6;">
-                        Cette discussion sera <strong>définitivement effacée</strong> et remplacée par une nouvelle conversation vierge.
-                    </p>
-                </div>
-                <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:12px;">
-                    <button type="button" class="secondary-btn" id="new-chat-cancel-btn" style="width:auto;">Annuler</button>
-                    <button type="button" class="secondary-btn" id="new-chat-confirm-btn" style="width:auto; background:var(--primary); color:white; border-color:var(--primary);">Effacer et continuer</button>
+                    <!-- Vue 1 : sélection d'un profil existant -->
+                    <div id="profile-select-view">
+                        <p class="profile-modal-hint">Sélectionnez un profil pour cette nouvelle conversation, ou créez-en un.</p>
+                        <div class="profile-list" id="profile-list"></div>
+                        <button type="button" class="secondary-btn profile-new-btn" id="profile-show-form-btn">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Créer un nouveau profil
+                        </button>
+                    </div>
+
+                    <!-- Vue 2 : formulaire de création de profil -->
+                    <form id="profile-form" style="display:none;">
+                        <p class="profile-modal-hint">Ces informations permettent à l'assistant de savoir à qui il s'adresse et d'adapter ses réponses en conséquence.</p>
+                        <label class="profile-field-label">
+                            Prénom
+                            <input type="text" id="profile-firstname" maxlength="60" required autocomplete="given-name">
+                        </label>
+                        <label class="profile-field-label">
+                            Nom
+                            <input type="text" id="profile-lastname" maxlength="60" required autocomplete="family-name">
+                        </label>
+                        <label class="profile-field-label" id="profile-extra-field-label">
+                            <span id="profile-extra-field-text">Formation</span>
+                            <input type="text" id="profile-extra-field" maxlength="120" placeholder="ex : Bachelor 3 Marketing Digital">
+                        </label>
+                        <div class="profile-form-actions">
+                            <button type="button" class="secondary-btn" id="profile-form-back-btn" style="width:auto;">Retour</button>
+                            <button type="submit" class="secondary-btn profile-submit-btn" style="width:auto;">Commencer la discussion</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
