@@ -185,21 +185,19 @@
                         </div>
                     </div>
                     <div class="files-list" id="files-list">
-                        <table class="files-table">
-                            <thead>
-                                <tr>
-                                    <th>Fichier</th>
-                                    <th>Catégorie</th>
-                                    <th>Taille</th>
-                                    <th>Blocs RAG</th>
-                                    <th>Dernière modification</th>
-                                    <th style="text-align: right;">Aperçu</th>
-                                </tr>
-                            </thead>
-                            <tbody id="files-tbody">
-                                <tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 24px;">Chargement...</td></tr>
-                            </tbody>
-                        </table>
+                        <div class="tree-toolbar">
+                            <button class="tree-toolbar-btn" id="tree-expand-all-btn" type="button">
+                                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+                                Tout déplier
+                            </button>
+                            <button class="tree-toolbar-btn" id="tree-collapse-all-btn" type="button">
+                                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+                                Tout replier
+                            </button>
+                        </div>
+                        <div class="file-tree" id="file-tree">
+                            <p class="tree-loading">Chargement...</p>
+                        </div>
                     </div>
                 </div>
 
@@ -456,6 +454,10 @@
                         <div class="glossary-item">
                             <dt>Requête hors-sujet ([NON-CONFORME])</dt>
                             <dd>Le bot préfixe sa réponse par [NON-CONFORME] quand la question sort du cadre pédagogique. Cette balise est retirée avant affichage mais comptabilisée.</dd>
+                        </div>
+                        <div class="glossary-item">
+                            <dt>Sans réponse ([SANS_REPONSE])</dt>
+                            <dd>Le bot préfixe sa réponse par [SANS_REPONSE] quand aucun document ne permet de répondre à la question (formule de repli). Cette balise est retirée avant affichage mais comptabilisée, et signalée par un badge ambre dans l'historique des requêtes.</dd>
                         </div>
                         <div class="glossary-item">
                             <dt>Cache RAM</dt>

@@ -33,7 +33,7 @@ adapter.onTurnError = async (context, error) => {
 
 const app = express();
 // L'application tourne derrière un reverse proxy HTTPS en production
-// (https://bot-teams.campus-pays-de-la-loire.fr). Sans ceci, req.protocol renvoie "http"
+// (https://chatbotcampus-pays-de-la-loire.fr). Sans ceci, req.protocol renvoie "http"
 // et les URL de redirection SSO générées seraient invalides.
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -78,7 +78,7 @@ class LocalRamVectorStore {
         this.documents = [];
     }
 
-    async addDocuments(chunks, onProgress = () => {}) {
+    async addDocuments(chunks, onProgress = () => { }) {
         const log = (msg) => { console.log(msg); onProgress({ type: 'log', message: msg }); };
         log(`   ↳ Envoi de ${chunks.length} blocs à Mistral pour embedding...`);
         const batchSize = 32;
@@ -245,7 +245,7 @@ async function extractTextFromBuffer(buffer, ext) {
 let vectorStore = null;
 let bot_instance = null;
 
-async function initKnowledgeBase(mistralClient, onProgress = () => {}) {
+async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
     const log = (msg) => { console.log(msg); onProgress({ type: 'log', message: msg }); };
     log("------------------------------------------");
     log("🔄 Indexation des documents en cours...");
@@ -507,16 +507,16 @@ app.get('/auth/callback', async (req, res) => {
 
         // Extraction complète de l'email depuis tous les champs possibles renvoyés par Microsoft
         const rawEmail = tokenResponse.account?.username ||
-                         tokenResponse.idTokenClaims?.preferred_username ||
-                         tokenResponse.idTokenClaims?.email ||
-                         tokenResponse.idTokenClaims?.upn ||
-                         tokenResponse.account?.name ||
-                         '';
+            tokenResponse.idTokenClaims?.preferred_username ||
+            tokenResponse.idTokenClaims?.email ||
+            tokenResponse.idTokenClaims?.upn ||
+            tokenResponse.account?.name ||
+            '';
 
         const email = rawEmail.trim().toLowerCase();
         const name = tokenResponse.account?.name ||
-                     tokenResponse.idTokenClaims?.name ||
-                     (email ? email.split('@')[0] : 'Utilisateur');
+            tokenResponse.idTokenClaims?.name ||
+            (email ? email.split('@')[0] : 'Utilisateur');
 
         // Attribution du rôle selon le domaine ou par défaut
         const role = resolveRoleFromEmail(email);
@@ -835,7 +835,7 @@ app.get('/api/refresh/stream', requireStatsAuthApi, (req, res) => {
     });
 });
 
-async function refreshKnowledgeBase(onProgress = () => {}) {
+async function refreshKnowledgeBase(onProgress = () => { }) {
     if (isRefreshing || !mistralGlobal) {
         onProgress({ type: 'error', message: "Une actualisation est déjà en cours ou le bot n'est pas encore initialisé." });
         return;

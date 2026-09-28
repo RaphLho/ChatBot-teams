@@ -111,8 +111,9 @@ const MAX_HISTORY = 1000;
  * @param {number|null} responseTimeMs - Temps de génération de la réponse par Mistral (ms), null si non mesuré
  * @param {string} model - Modèle utilisé ('mistral-small-latest' ou 'mistral-embed')
  * @param {string} displayName - Nom déclaré par la personne (popup de profil côté web), vide si inconnu
+ * @param {boolean} isNoAnswer - Vrai si le bot a utilisé sa formule de repli « je ne sais pas »
  */
-function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest', displayName = '') {
+function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest', displayName = '', isNoAnswer = false) {
     const pTokens = promptTokens || 0;
     const cTokens = completionTokens || 0;
     const totalTk = pTokens + cTokens;
@@ -130,6 +131,7 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
         question,
         answer,
         isNonCompliant,
+        isNoAnswer,
         responseTimeMs: hasTiming ? responseTimeMs : null,
         model
     };

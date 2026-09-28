@@ -157,6 +157,11 @@ Chaque réponse issue des documents cite sa source sous la forme :
 
 const ETUDIANT_CONTACT = "le service scolarité de votre campus";
 const COLLABORATEUR_CONTACT = "votre support interne ou votre référent RH";
+// Formulaire de contact support, réservé au mode Collaborateur : cette constante n'est
+// référencée que par buildCollaborateurPrompt (formule de repli ci-dessous), jamais par les
+// prompts Étudiant ou par défaut — le lien ne peut donc jamais apparaître dans une réponse
+// destinée à un étudiant.
+const COLLABORATEUR_SUPPORT_FORM_URL = "https://form.jotform.com/243012118488049";
 
 function buildEtudiantPrompt(dateStr) {
     return `# RÔLE
@@ -173,7 +178,7 @@ ${buildFormationBlock()}
 Toute affirmation que tu attribues à un document (règle, procédure, date, seuil, nombre, contact, droit) doit provenir littéralement des <EXTRAITS>. Tu n'attribues jamais à un document une information qui n'y figure pas, même si tu penses la connaître par ailleurs. Tes connaissances générales ne servent qu'à reformuler, structurer ou clarifier un contenu déjà présent dans les extraits — jamais à compléter une règle absente.
 
 Si les extraits ne contiennent pas l'information, ou sont hors sujet par rapport à la question, tu dois répondre EXACTEMENT, mot pour mot, sans reformulation ni ajout :
-« Je ne trouve pas cette information dans les documents auxquels j'ai accès. Je vous invite à contacter ${ETUDIANT_CONTACT} pour une réponse fiable. »
+« [SANS_REPONSE] Je ne trouve pas cette information dans les documents auxquels j'ai accès. Je vous invite à contacter ${ETUDIANT_CONTACT} pour une réponse fiable. »
 Tu ne remplaces jamais cette phrase par une explication personnalisée, même si le sujet te semble mineur ou secondaire.
 Tu ne déduis jamais une règle par analogie avec une autre formation, une autre année ou un autre campus. Une règle absente est une règle inconnue.
 
@@ -211,7 +216,8 @@ Toute affirmation que tu attribues à un document (règle, procédure, date, seu
 Exception : pour l'usage général d'un outil ou d'une procédure non couverte par la documentation interne, tu peux répondre à partir de tes connaissances générales sur ce type d'outils, à condition de préciser clairement que cette partie de la réponse n'est pas issue de la documentation interne.
 
 Si ni les extraits ni tes connaissances générales sur ce type d'outils ne permettent de répondre, tu dois répondre EXACTEMENT, mot pour mot, sans reformulation ni ajout :
-« Je ne trouve pas cette information dans la documentation à laquelle j'ai accès. Je vous invite à contacter ${COLLABORATEUR_CONTACT}. »
+« [SANS_REPONSE] Je ne sais pas répondre à cette question à partir des documents auxquels j'ai accès. Le plus simple est de contacter le support via ce formulaire : ${COLLABORATEUR_SUPPORT_FORM_URL} »
+Tu ne remplaces jamais cette phrase par une explication personnalisée, et tu ne mentionnes ce formulaire QUE dans cette formule de repli exacte — jamais ailleurs dans une réponse.
 
 ${buildCitationBlock(COLLABORATEUR_CONTACT)}
 
@@ -244,7 +250,7 @@ ${buildFormationBlock()}
 Toute affirmation que tu attribues à un document (règle, procédure, date, seuil, nombre, contact, droit) doit provenir littéralement des <EXTRAITS>. Tu n'attribues jamais à un document une information qui n'y figure pas, même si tu penses la connaître par ailleurs. Tes connaissances générales ne servent qu'à reformuler, structurer ou clarifier un contenu déjà présent dans les extraits — jamais à compléter une règle absente.
 
 Si les extraits ne contiennent pas l'information, ou sont hors sujet par rapport à la question, tu dois répondre EXACTEMENT, mot pour mot, sans reformulation ni ajout :
-« Je ne trouve pas cette information dans les documents auxquels j'ai accès. Je vous invite à contacter ${ETUDIANT_CONTACT} pour une réponse fiable. »
+« [SANS_REPONSE] Je ne trouve pas cette information dans les documents auxquels j'ai accès. Je vous invite à contacter ${ETUDIANT_CONTACT} pour une réponse fiable. »
 Tu ne déduis jamais une règle par analogie avec une autre formation, une autre année ou un autre campus. Une règle absente est une règle inconnue.
 
 ${buildCitationBlock(ETUDIANT_CONTACT)}
@@ -404,11 +410,20 @@ class RAGBot extends ActivityHandler {
 
         let finalAnswer = chatResponse.choices[0].message.content;
         let isNonCompliant = false;
+        let isNoAnswer = false;
 
         // Détection de hors sujet
         if (finalAnswer.includes('[NON-CONFORME]')) {
             isNonCompliant = true;
             finalAnswer = finalAnswer.replace('[NON-CONFORME]', '').trim();
+        }
+
+        // Détection de la formule de repli « je ne sais pas » (balise ajoutée par les prompts
+        // système, cf. RÈGLE D'ANCRAGE ET FORMULE DE REPLI), pour affichage d'un visuel dédié
+        // dans l'historique des statistiques.
+        if (finalAnswer.includes('[SANS_REPONSE]')) {
+            isNoAnswer = true;
+            finalAnswer = finalAnswer.replace('[SANS_REPONSE]', '').trim();
         }
 
         // 4.b Enregistrement des tokens (avec le nom déclaré, pour l'affichage dans les statistiques)
@@ -417,11 +432,11 @@ class RAGBot extends ActivityHandler {
         if (usage) {
             const promptTk = usage.promptTokens || usage.prompt_tokens || 0;
             const completionTk = usage.completionTokens || usage.completion_tokens || 0;
-            console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}`);
-            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName);
+            console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}${isNoAnswer ? ' [SANS RÉPONSE]' : ''}`);
+            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer);
         } else {
             console.warn('⚠️ Pas de données usage dans la réponse Mistral');
-            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName);
+            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer);
         }
 
         // 5. Mise en cache et historique

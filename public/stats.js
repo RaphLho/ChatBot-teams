@@ -540,7 +540,7 @@ async function loadStats() {
         document.getElementById('files-total-count').textContent = filesData.total || 0;
         document.getElementById('files-chunks-count').textContent = formatNumber(stats.totalChunksIndexed || filesData.totalChunks || 0);
         document.getElementById('files-total-size').textContent = `${formatBytes(filesData.totalSize)} au total`;
-        updateFilesTable(filesData.files || []);
+        renderFileTree(filesData.files || []);
 
         // ---- KPIs ----
         const date = new Date();
@@ -604,71 +604,123 @@ async function loadStats() {
 }
 
 // ============================================
-// Files Table
+// Arborescence des fichiers (dossiers déroulants)
 // ============================================
-function updateFilesTable(files) {
-    const tbody = document.getElementById('files-tbody');
+// Construit un arbre { name, type: 'folder'|'file', children: Map, fileCount } à partir de la
+// liste plate renvoyée par /api/stats/files, en utilisant relativeDir (chemin des sous-dossiers
+// sans la racine OneDrive, calculé côté serveur) pour retrouver la hiérarchie réelle.
+function buildFileTree(files) {
+    const root = { name: '', type: 'folder', children: new Map(), fileCount: 0 };
+
+    files.forEach(file => {
+        const segments = file.relativeDir ? file.relativeDir.split('/').filter(Boolean) : [];
+        let node = root;
+        node.fileCount += 1;
+        segments.forEach(seg => {
+            if (!node.children.has(seg)) {
+                node.children.set(seg, { name: seg, type: 'folder', children: new Map(), fileCount: 0 });
+            }
+            node = node.children.get(seg);
+            node.fileCount += 1;
+        });
+        node.children.set('file::' + file.fullPath, { name: file.fileName, type: 'file', file, fileCount: 1 });
+    });
+
+    return root;
+}
+
+function sortedTreeChildren(node) {
+    return Array.from(node.children.values()).sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name, 'fr');
+    });
+}
+
+function detectRootCategoryClass(folderName) {
+    if (folderName === 'Etudiant') return 'cat-etudiant';
+    if (folderName === 'Collaborateur') return 'cat-collaborateur';
+    return '';
+}
+
+// Mémorise les dossiers ouverts (par chemin, ex. "Etudiant/01_Etudiant") d'un rendu à l'autre :
+// sans ça, l'auto-refresh des stats (toutes les 30s) replierait tout à chaque fois. `null` tant
+// qu'aucun rendu n'a eu lieu, pour ne définir l'état par défaut (racines ouvertes) qu'une fois.
+let treeOpenPaths = null;
+
+function renderTreeNode(node, depth, path) {
+    if (node.type === 'file') {
+        const file = node.file;
+        const ext = file.fileName.split('.').pop().toLowerCase();
+        const extClass = ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'md'].includes(ext) ? ext : '';
+        const sizeFormatted = formatBytes(file.size);
+        const modDate = file.lastModified ? new Date(file.lastModified).toLocaleDateString('fr-FR', {
+            day: '2-digit', month: '2-digit', year: 'numeric'
+        }) : '—';
+
+        return `
+            <div class="tree-file" style="--depth:${depth}" data-path="${encodeURIComponent(file.fullPath)}" title="${escapeHtml(file.fileName)}">
+                <span class="file-ext-badge ${extClass}">${ext}</span>
+                <span class="tree-file-name">${escapeHtml(file.fileName)}</span>
+                <span class="tree-file-meta">${sizeFormatted} · ${file.chunksCount || 0} bloc(s) · ${modDate}</span>
+                <button class="tree-file-preview-btn" type="button" data-path="${encodeURIComponent(file.fullPath)}" title="Aperçu du document">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+        `;
+    }
+
+    const children = sortedTreeChildren(node);
+    const childrenHtml = children.map(c => renderTreeNode(c, depth + 1, `${path}/${c.name}`)).join('');
+    const catClass = depth === 0 ? detectRootCategoryClass(node.name) : '';
+    const isOpen = treeOpenPaths.has(path);
+
+    return `
+        <div class="tree-folder ${catClass} ${isOpen ? 'open' : ''}" data-tree-path="${escapeHtml(path)}">
+            <div class="tree-folder-header" style="--depth:${depth}">
+                <svg class="tree-chevron" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                <svg class="tree-folder-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span class="tree-folder-name">${escapeHtml(node.name)}</span>
+                <span class="tree-folder-count">${node.fileCount} fichier${node.fileCount > 1 ? 's' : ''}</span>
+            </div>
+            <div class="tree-folder-children">
+                ${childrenHtml}
+            </div>
+        </div>
+    `;
+}
+
+function renderFileTree(files) {
+    const container = document.getElementById('file-tree');
+    if (!container) return;
 
     if (!files || files.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 24px; font-style: italic;">Aucun fichier indexé</td></tr>';
+        container.innerHTML = '<p class="tree-loading" style="font-style: italic;">Aucun fichier indexé</p>';
         return;
     }
 
-    tbody.innerHTML = files.map(file => {
-        const ext = file.fileName.split('.').pop().toLowerCase();
-        const extClass = ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'md'].includes(ext) ? ext : '';
+    const root = buildFileTree(files);
+    const topNodes = sortedTreeChildren(root);
 
-        // Determine folder category
-        let folderClass = 'autre';
-        let folderLabel = file.folder || 'Autre';
-        const fp = file.fullPath || '';
-        if (fp.includes('Etudiant')) { folderClass = 'etudiant'; folderLabel = 'Étudiant'; }
-        else if (fp.includes('Collaborateur')) { folderClass = 'collaborateur'; folderLabel = 'Collaborateur'; }
+    // Premier rendu seulement : les dossiers racine (Étudiant/Collaborateur/Autre) sont ouverts
+    // par défaut, tout le reste replié.
+    if (treeOpenPaths === null) {
+        treeOpenPaths = new Set(topNodes.map(n => n.name));
+    }
 
-        const modDate = file.lastModified ? new Date(file.lastModified).toLocaleDateString('fr-FR', {
-            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-        }) : '—';
+    container.innerHTML = topNodes.map(node => renderTreeNode(node, 0, node.name)).join('');
 
-        const sizeFormatted = formatBytes(file.size);
-        const chunksCount = file.chunksCount || 0;
+    container.querySelectorAll('.tree-folder').forEach(folderEl => {
+        const header = folderEl.querySelector('.tree-folder-header');
+        const path = folderEl.getAttribute('data-tree-path');
+        header.addEventListener('click', () => {
+            const nowOpen = folderEl.classList.toggle('open');
+            if (nowOpen) treeOpenPaths.add(path); else treeOpenPaths.delete(path);
+        });
+    });
 
-        // Fil d'Ariane du sous-dossier réel (ex: "Etudiant › 01_Etudiant › B3CN"), affiché sous le
-        // nom du fichier pour qu'on voie immédiatement où il se trouve dans l'arborescence
-        // OneDrive, plutôt que seulement sa catégorie de premier niveau.
-        const dirCrumb = file.relativeDir
-            ? `<div class="file-path-crumb" title="${escapeHtml(file.relativeDir)}">${escapeHtml(file.relativeDir).split('/').join(' <span class="crumb-sep">›</span> ')}</div>`
-            : '';
-
-        return `
-            <tr class="file-row-clickable" data-path="${encodeURIComponent(file.fullPath)}">
-                <td>
-                    <div class="file-name-cell">
-                        <span class="file-ext-badge ${extClass}">${ext}</span>
-                        <div class="file-name-wrap">
-                            <span class="file-name-text" title="${file.fileName}">${file.fileName}</span>
-                            ${dirCrumb}
-                        </div>
-                    </div>
-                </td>
-                <td><span class="folder-badge ${folderClass}">${folderLabel}</span></td>
-                <td class="file-size-cell"><strong>${sizeFormatted}</strong></td>
-                <td class="file-chunks-count-cell">${chunksCount} bloc(s)</td>
-                <td>${modDate}</td>
-                <td style="text-align: right;">
-                    <button class="file-view-btn" type="button" data-path="${encodeURIComponent(file.fullPath)}">
-                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        Aperçu
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join('');
-
-    // Attach click events on rows & preview buttons
-    tbody.querySelectorAll('.file-row-clickable').forEach(row => {
-        row.addEventListener('click', (e) => {
-            const path = decodeURIComponent(row.getAttribute('data-path'));
-            openFileModal(path);
+    container.querySelectorAll('.tree-file').forEach(row => {
+        row.addEventListener('click', () => {
+            openFileModal(decodeURIComponent(row.getAttribute('data-path')));
         });
     });
 }
@@ -815,7 +867,9 @@ function renderHistoryEntries(entries, filter) {
 
         const statusHtml = entry.isNonCompliant
             ? '<span class="status-badge warn">🚫 Hors-sujet</span>'
-            : '<span class="status-badge ok">✓ Conforme</span>';
+            : entry.isNoAnswer
+                ? '<span class="status-badge noanswer">❓ Sans réponse</span>'
+                : '<span class="status-badge ok">✓ Conforme</span>';
 
         const timeHtml = entry.responseTimeMs
             ? `<span class="meta-item"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${formatResponseTime(entry.responseTimeMs)}</span>`
@@ -828,8 +882,10 @@ function renderHistoryEntries(entries, filter) {
             ? `${escapeHtml(entry.displayName)} <span class="history-entry-user-id">(${escapeHtml(truncateUserId(entry.userId || ''))})</span>`
             : escapeHtml(entry.userId || 'inconnu');
 
+        const cardClass = entry.isNonCompliant ? 'entry-noncompliant' : (entry.isNoAnswer ? 'entry-noanswer' : '');
+
         return `
-            <div class="history-entry ${entry.isNonCompliant ? 'entry-noncompliant' : ''}"
+            <div class="history-entry ${cardClass}"
                 data-question="${encodeURIComponent(entry.question || 'Pas de question')}"
                 data-answer="${encodeURIComponent(entry.answer || 'Pas de réponse')}">
                 <div class="history-entry-header">
@@ -959,6 +1015,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filesToggle && filesCard) {
         filesToggle.addEventListener('click', () => {
             filesCard.classList.toggle('open');
+        });
+    }
+});
+
+// ============================================
+// Arborescence des fichiers : tout déplier / tout replier
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    const expandAllBtn = document.getElementById('tree-expand-all-btn');
+    const collapseAllBtn = document.getElementById('tree-collapse-all-btn');
+    const treeContainer = document.getElementById('file-tree');
+
+    if (expandAllBtn && treeContainer) {
+        expandAllBtn.addEventListener('click', () => {
+            treeContainer.querySelectorAll('.tree-folder').forEach(folderEl => {
+                folderEl.classList.add('open');
+                if (treeOpenPaths) treeOpenPaths.add(folderEl.getAttribute('data-tree-path'));
+            });
+        });
+    }
+
+    if (collapseAllBtn && treeContainer) {
+        collapseAllBtn.addEventListener('click', () => {
+            treeContainer.querySelectorAll('.tree-folder').forEach(folderEl => {
+                folderEl.classList.remove('open');
+                if (treeOpenPaths) treeOpenPaths.delete(folderEl.getAttribute('data-tree-path'));
+            });
         });
     }
 });

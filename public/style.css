@@ -1203,83 +1203,164 @@ body {
     display: block;
 }
 
-.files-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-}
-
-.files-table thead {
+/* ============================================ */
+/* Arborescence des fichiers (dossiers déroulants) */
+/* ============================================ */
+.tree-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
     background: var(--primary-light);
     position: sticky;
     top: 0;
     z-index: 2;
 }
 
-.files-table th {
-    padding: 12px 16px;
-    text-align: left;
-    font-weight: 600;
+.tree-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: white;
+    font-family: inherit;
+    font-size: 0.76rem;
+    font-weight: 500;
     color: var(--text-secondary);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-}
-
-.files-table td {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-primary);
-    vertical-align: middle;
-}
-
-.files-table tbody tr:last-child td {
-    border-bottom: none;
-}
-
-.file-row-clickable {
     cursor: pointer;
     transition: all 0.15s ease;
 }
 
-.file-row-clickable:hover {
-    background: var(--primary-light) !important;
+.tree-toolbar-btn:hover {
+    background: var(--primary-light);
+    color: var(--text-primary);
+    border-color: #d4d4d8;
 }
 
-.file-name-cell {
+.file-tree {
+    padding: 6px 8px;
+}
+
+.tree-loading {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px;
+}
+
+.tree-folder-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    padding-left: calc(var(--depth) * 18px + 10px);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.tree-folder-header:hover {
+    background: var(--primary-light);
+}
+
+.tree-chevron {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+    color: var(--text-secondary);
+}
+
+.tree-folder.open > .tree-folder-header .tree-chevron {
+    transform: rotate(90deg);
+}
+
+.tree-folder-icon {
+    flex-shrink: 0;
+    color: var(--accent-amber);
+}
+
+.tree-folder-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-folder-count {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    background: var(--primary-light);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.tree-folder-children {
+    display: none;
+}
+
+.tree-folder.open > .tree-folder-children {
+    display: block;
+}
+
+/* Teinte des dossiers racine selon la catégorie (cohérent avec .folder-badge) */
+.tree-folder.cat-etudiant > .tree-folder-header .tree-folder-icon { color: var(--accent-blue); }
+.tree-folder.cat-collaborateur > .tree-folder-header .tree-folder-icon { color: var(--accent-violet); }
+
+.tree-file {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-weight: 500;
+    padding: 7px 10px;
+    padding-left: calc(var(--depth) * 18px + 10px);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease;
 }
 
-.file-name-wrap {
-    min-width: 0;
+.tree-file:hover {
+    background: var(--primary-light);
 }
 
-.file-name-text {
-    display: block;
-    max-width: 320px;
+.tree-file-name {
+    font-size: 0.85rem;
+    color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 320px;
 }
 
-.file-path-crumb {
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.tree-file-meta {
+    margin-left: auto;
+    flex-shrink: 0;
     font-size: 0.74rem;
-    font-weight: 400;
     color: var(--text-secondary);
-    margin-top: 2px;
+    white-space: nowrap;
 }
 
-.file-path-crumb .crumb-sep {
-    opacity: 0.5;
-    margin: 0 1px;
+.tree-file-preview-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.tree-file-preview-btn:hover {
+    background: white;
+    border-color: var(--border);
+    color: var(--primary);
 }
 
 .file-ext-badge {
@@ -1312,41 +1393,6 @@ body {
 .folder-badge.etudiant { background: var(--accent-blue-light); color: var(--accent-blue); }
 .folder-badge.collaborateur { background: var(--accent-violet-light); color: var(--accent-violet); }
 .folder-badge.autre { background: var(--primary-light); color: var(--text-secondary); }
-
-.file-size-cell {
-    font-variant-numeric: tabular-nums;
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.file-chunks-count-cell {
-    font-variant-numeric: tabular-nums;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
-.file-view-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: white;
-    font-family: inherit;
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: var(--primary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.file-view-btn:hover {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-}
 
 /* ============================================ */
 /* File Modal                                   */
@@ -1613,6 +1659,11 @@ body {
 .history-entry.entry-noncompliant {
     border-left: 4px solid var(--accent-rose);
     background: rgba(244, 63, 94, 0.02);
+}
+
+.history-entry.entry-noanswer {
+    border-left: 4px solid var(--accent-amber);
+    background: rgba(245, 158, 11, 0.03);
 }
 
 .history-entry-header {
@@ -2091,6 +2142,11 @@ body {
 .status-badge.warn {
     background: var(--accent-rose-light);
     color: #be123c;
+}
+
+.status-badge.noanswer {
+    background: var(--accent-amber-light);
+    color: #b45309;
 }
 
 .speed-badge {
