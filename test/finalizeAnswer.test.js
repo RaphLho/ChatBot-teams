@@ -93,3 +93,17 @@ test('finalizeAnswer : nom de fichier inventé commençant par « Document » co
   const r = finalizeAnswer("Le RDV est sous 1 semaine.\nD'après les documents CRM Kanban commercial.xlsx, Document inventé.docx", [kanban]);
   assert.deepEqual(r.invalid, ['Document inventé.docx']);
 });
+
+test('finalizeAnswer : ligne « Source : … » recopiée par le modèle retirée (pas de double citation)', () => {
+  for (const line of [
+    'Source : CRM Kanban commercial.xlsx › Kanban prospects › Colonne « Intéressé »',
+    '**Sources :** [1] CRM Kanban commercial.xlsx',
+    '[1] Source : Tips - Fonctionnalité des activités.docx',
+  ]) {
+    const r = finalizeAnswer(`Le RDV est sous 1 semaine, puis bascule en Transaction perdue après 2 mois.\n\n${line}`, [kanban]);
+    assert.equal(r.text, "Le RDV est sous 1 semaine, puis bascule en Transaction perdue après 2 mois.\n\nD'après le document CRM Kanban commercial.xlsx", line);
+  }
+  const inline = finalizeAnswer('Le RDV est sous 1 semaine (Source : CRM Kanban commercial.xlsx).', [kanban]);
+  assert.match(inline.text, /^Le RDV est sous 1 semaine\.\n\nD'après/);
+  assert.deepEqual(finalizeAnswer('x\nSource : Tips - Fonctionnalité des activités.docx', [kanban]).invalid, ['Tips - Fonctionnalité des activités.docx']);
+});

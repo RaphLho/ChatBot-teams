@@ -18,8 +18,10 @@ export function finalizeAnswer(raw, chunks, { minShare = 0.12, relShare = 0.4, n
     .split('\n')
     .filter((line) => {
       const l = line.trim();
-      if (!/^d['’]apr[eè]s\b/i.test(l)) return true;
-      if (l.length > 220 || (!FILE.test(l) && !/\[\d+\]/.test(l))) return true;     // vraie phrase de contenu
+      // Ligne « Source : fichier › section » (ou « [1] Source : … ») recopiée depuis les extraits
+      const sourceLine = /^[*_>•\-\s]*(?:\[\d+\]\s*)?sources?\s*:/i.test(l);
+      if (!sourceLine && !/^d['’]apr[eè]s\b/i.test(l)) return true;
+      if (l.length > 220 || (!sourceLine && !FILE.test(l) && !/\[\d+\]/.test(l))) return true;     // vraie phrase de contenu
       (l.match(/[^\s,;:«»"]+(?: [^\s,;:«»"]+)*?\.(?:docx?|xlsx?|pdf|csv|txt|pptx?)/gi) || [])
         // Préfixe « D'après … le fichier / les documents » retiré seulement en tête de citation :
         // un nom de fichier qui commence lui-même par « Document » reste entier.
@@ -29,6 +31,7 @@ export function finalizeAnswer(raw, chunks, { minShare = 0.12, relShare = 0.4, n
     })
     .join('\n')
     .replace(/\s*\((?:extraits?|sources?)\s*\[[^\]]*\](?:[^)]*)\)/gi, '')
+    .replace(/\s*\(sources?\s*:[^)]*\)/gi, '')                          // « (Source : X.docx) » en fin de phrase
     .replace(/\bextraits?\s*\[\d+\](?:\s*(?:et|,)\s*\[\d+\])*/gi, 'les documents')
     .trim();
 
