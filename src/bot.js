@@ -1,8 +1,10 @@
 import botbuilder from 'botbuilder';
 import botStats, { recordUsage, recordLocalAnswer } from './stats.js';
 import {
-    expandQuery, retrieve, ragOptionsFromEnv, formatExtraits, trimHistory, checkCitations, AnswerCache,
+    expandQuery, retrieve, ragOptionsFromEnv, formatExtraits, trimHistory, AnswerCache,
 } from './ragBoost.js';
+import { finalizeAnswer } from './finalizeAnswer.js';
+import { logRagDebug, describeChunks } from './ragDebugLog.js';
 const { ActivityHandler } = botbuilder;
 
 // Mémoire courte : historique des conversations par utilisateur (en RAM)
@@ -323,7 +325,7 @@ class RAGBot extends ActivityHandler {
             indexVersion: this.vectorStore?.indexVersion || 'none',
         });
         if (!previous) {
-            const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName);
+            const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName, mode);
             if (hit) return hit;
         }
 
@@ -356,7 +358,7 @@ class RAGBot extends ActivityHandler {
             // En cas d'erreur, on préfère conserver le contexte plutôt que le perdre à tort.
             isFollowUp = current && before ? cosine(current, before) >= TOPIC_SIMILARITY_THRESHOLD : true;
             if (!isFollowUp) {
-                const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName, vectors.get(userQuestion));
+                const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName, mode, vectors.get(userQuestion));
                 if (hit) return hit;
             }
         }
@@ -397,6 +399,10 @@ class RAGBot extends ActivityHandler {
             recordLocalAnswer({
                 userId, question: userQuestion, answer: fallback, displayName, isNoAnswer: true,
                 local: 'fallback', rag: { ...ragStats, llmSkipped: true },
+            });
+            logRagDebug({
+                mode, question: userQuestion, chunks: describeChunks(retrieval),
+                confident: retrieval.confident, status: 'repli_code',
             });
             this._updateHistory(userId, userQuestion, fallback, vectors.get(userQuestion));
             return fallback;
@@ -446,11 +452,12 @@ class RAGBot extends ActivityHandler {
         );
         const responseTimeMs = Date.now() - requestStartTime;
 
-        // Contrôle des citations : les noms de fichiers cités hors des extraits envoyés sont retirés.
+        // Sources ajoutées par le code : les citations écrites par le modèle sont retirées (noms de
+        // fichiers inventés signalés) et remplacées par les fichiers des extraits réellement utilisés.
         const rawAnswer = chatResponse.choices[0].message.content;
         const citations = retrieval
-            ? checkCitations(rawAnswer, retrieval.chunks)
-            : { text: rawAnswer, invalid: [], suspect: false };
+            ? finalizeAnswer(rawAnswer, retrieval.chunks)
+            : { text: rawAnswer.trim(), files: [], invalid: [], suspect: false };
         let finalAnswer = citations.text;
         let isNonCompliant = false;
         let isNoAnswer = false;
@@ -472,11 +479,18 @@ class RAGBot extends ActivityHandler {
         if (ragStats) {
             ragStats.invalidCitations = citations.invalid.length;
             ragStats.suspect = citations.suspect;
+            ragStats.sourceAdded = citations.files.length > 0;
             // « Repli suspect » : le modèle dit ne pas savoir alors que le premier extrait était
             // très pertinent (probable refus abusif, à examiner dans l'historique).
             ragStats.suspectFallback = isNoAnswer && isStrongTop(retrieval.top);
             if (citations.invalid.length) console.warn(`⚠️ Citation(s) hors extraits retirée(s) : ${citations.invalid.join(', ')}`);
         }
+        logRagDebug({
+            mode, question: userQuestion, chunks: describeChunks(retrieval),
+            confident: retrieval ? retrieval.confident : null,
+            status: isNonCompliant ? 'non_conforme' : isNoAnswer ? 'sans_reponse' : 'answered',
+            files: citations.files, invalid: citations.invalid,
+        });
 
         // 6.b Enregistrement des tokens (avec le nom déclaré, pour l'affichage dans les statistiques)
         const usage = chatResponse.usage;
@@ -503,10 +517,12 @@ class RAGBot extends ActivityHandler {
      * Sert une réponse depuis le cache si elle existe (0 token LLM), et l'enregistre comme telle
      * dans les statistiques. Retourne la réponse, ou null si absente du cache.
      */
-    _serveFromCache(cacheKey, userId, question, displayName, vector = null) {
+    _serveFromCache(cacheKey, userId, question, displayName, mode, vector = null) {
         const cached = answerCache.get(cacheKey);
         if (!cached) return null;
         botStats.cacheHits += 1;
+        // La réponse en cache contient déjà sa source (ajoutée par finalizeAnswer) : pas de retraitement.
+        logRagDebug({ mode, question, fromCache: true, status: cached.isNoAnswer ? 'sans_reponse' : 'answered' });
         recordLocalAnswer({
             userId, question, answer: cached.answer, displayName, isNoAnswer: cached.isNoAnswer,
             local: 'cache', rag: { cached: true },
