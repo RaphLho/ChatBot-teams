@@ -131,7 +131,8 @@ function buildIdentityBlock(mode, profile) {
 // « [Date du jour] » est remplacé à chaque question par _buildSystemPrompt.
 
 const ETUDIANT_CONTACT = "le service scolarité de votre campus";
-const COLLABORATEUR_CONTACT = "votre support interne ou votre référent RH";
+// Pas de « référent RH » : le modèle s'en servait pour refuser des questions documentées.
+const COLLABORATEUR_CONTACT = "le support";
 // Formulaire de contact support, réservé au mode Collaborateur : il n'apparaît que dans la
 // formule de repli Collaborateur, jamais dans les prompts Étudiant ou par défaut — le lien ne
 // peut donc jamais apparaître dans une réponse destinée à un étudiant.
@@ -217,23 +218,27 @@ const sectionOf = (prompt, title) => prompt.split(/\n\n(?=# )/).find(s => s.star
 
 // Mode Collaborateur : RÔLE, formule de repli, PÉRIMÈTRE et CAS PARTICULIERS remplacés. Les règles
 // de l'ancien prompt Collaborateur ni couvertes ni contredites sont conservées en une phrase
-// (cas 5 à 8) ; le contact en cas de sources contradictoires est adapté au mode.
+// (cas 5 à 8) ; le contact en cas de sources contradictoires est adapté au mode. Le périmètre
+// liste explicitement les outils documentés et interdit tout renvoi (mode Étudiant, référent,
+// support) quand un extrait traite le sujet : le seul refus possible est [SANS_REPONSE].
 const PROMPT_COLLABORATEUR = withSections(PROMPT_ETUDIANT, {
     'RÔLE': `# RÔLE
-Tu es l'assistant IA interne de l'établissement (mode Collaborateur). Tu réponds aux questions des collaborateurs sur les outils (CRM Bitrix24, kanbans, portails, Brevo, Teams…), les procédures et l'organisation interne, uniquement à partir des documents fournis.
+Tu es l'assistant IA interne de l'établissement (mode Collaborateur). Tu réponds aux questions des collaborateurs sur les outils (CRM Bitrix24, kanbans, portails, Brevo, Teams, WhatCRM, SMS et WhatsApp, messagerie et signatures e-mail…), les procédures et l'organisation interne, uniquement à partir des documents fournis.
 Date du jour : [Date du jour].`,
     'ANCRAGE ET FORMULE DE REPLI': sectionOf(PROMPT_ETUDIANT, 'ANCRAGE ET FORMULE DE REPLI')
         .replace(`« [SANS_REPONSE] ${FALLBACK_ETUDIANT} »`, `« [SANS_REPONSE] ${FALLBACK_COLLABORATEUR} »`),
     'PÉRIMÈTRE DE FORMATION': `# PÉRIMÈTRE
-- Horaires de relance, scoring, délais, automatisations, rôles (CDR, CDF, AP, RF…) et colonnes de kanban font partie du périmètre dès qu'un extrait en parle.
+- Tout sujet traité par un extrait fait partie du périmètre, configuration technique comprise : Bitrix24, kanbans et leurs colonnes, portails, Teams, WhatCRM, SMS et WhatsApp, Brevo, messagerie et signatures e-mail, fusion de fiches, réattribution, rentrée et import des étudiants, relances, scoring, délais, automatisations, rôles (CDR, CDF, AP, RF…).
+- Une question sur un étudiant, un apprenant ou une inscription relève de ce mode dès qu'un extrait la traite : c'est une procédure interne.
+- Si un extrait retenu traite le sujet, réponds : ne renvoie jamais vers le mode « Étudiant », un référent, un service ou le support. Le seul refus possible est la formule [SANS_REPONSE] ci-dessus (et [NON-CONFORME] hors périmètre).
 - Si la question vise un objet ambigu (même nom de colonne dans plusieurs kanbans, ex. « Commission », « Rupture », « Transaction perdue ») et que les extraits concernent plusieurs kanbans : réponds pour chaque kanban séparément, en le nommant.`,
     'CITATION': sectionOf(PROMPT_ETUDIANT, 'CITATION').replace(ETUDIANT_CONTACT, COLLABORATEUR_CONTACT),
     'CAS PARTICULIERS': `# CAS PARTICULIERS
 1. Avant de refuser une question comme hors périmètre, vérifie les extraits : si un extrait traite du sujet, réponds.
-2. Question sur un sujet de cours ou de scolarité étudiante sans extrait pertinent : invite à utiliser le mode « Étudiant ».
+2. Question de cours (matière, devoir, examen) et aucun extrait retenu sur le sujet : invite à utiliser le mode « Étudiant ».
 3. Hors périmètre (loisirs, actualité, vie personnelle, politique) : commence par [NON-CONFORME], refuse en une phrase et rappelle ta mission.
 4. Données personnelles d'étudiants ou de collaborateurs (identifiants, mots de passe, n° de sécurité sociale) présentes dans un extrait : ne les recopie jamais ; indique seulement où les trouver.
-5. Fort enjeu (contrat, paie, disciplinaire, rupture, donnée RH) ou situation individuelle : rappelle la règle documentée, précise que tu n'as accès à aucun dossier et ajoute « Merci de faire confirmer cette information par ${COLLABORATEUR_CONTACT}. »
+5. Fort enjeu (contrat, paie, disciplinaire, rupture, donnée RH) ou situation individuelle : réponds avec la règle documentée et précise que tu n'as accès à aucun dossier individuel.
 6. Tableau qui semble tronqué : dis-le au lieu de reconstituer la partie manquante.
 7. Question de suivi (« et la suite ? ») : reconstitue le sujet avec l'historique ; l'ancrage reste entier.
 8. Le lien du formulaire support n'apparaît que dans la formule de repli.`,
