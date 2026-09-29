@@ -88,3 +88,8 @@ test('selectChunks : le plafond ne descend pas sous le nombre d\'expressions cit
   assert.equal(selectChunks(fused, map, { quoted: 4 }).chunks.length, 4);
   assert.equal(selectChunks(fused, map, { quoted: 9 }).chunks.length, 5);
 });
+
+test('finalizeAnswer : nom de fichier inventé commençant par « Document » conservé entier', () => {
+  const r = finalizeAnswer("Le RDV est sous 1 semaine.\nD'après les documents CRM Kanban commercial.xlsx, Document inventé.docx", [kanban]);
+  assert.deepEqual(r.invalid, ['Document inventé.docx']);
+});

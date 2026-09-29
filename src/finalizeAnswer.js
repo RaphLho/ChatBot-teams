@@ -21,7 +21,9 @@ export function finalizeAnswer(raw, chunks, { minShare = 0.12, relShare = 0.4, n
       if (!/^d['’]apr[eè]s\b/i.test(l)) return true;
       if (l.length > 220 || (!FILE.test(l) && !/\[\d+\]/.test(l))) return true;     // vraie phrase de contenu
       (l.match(/[^\s,;:«»"]+(?: [^\s,;:«»"]+)*?\.(?:docx?|xlsx?|pdf|csv|txt|pptx?)/gi) || [])
-        .map((f) => f.replace(/^.*?(?:fichiers?|documents?)\s+/i, '').replace(/^(et|,)\s*/i, '').trim())
+        // Préfixe « D'après … le fichier / les documents » retiré seulement en tête de citation :
+        // un nom de fichier qui commence lui-même par « Document » reste entier.
+        .map((f) => f.replace(/^d['’]apr[eè]s\b.*?\b(?:fichiers?|documents?)\s+/i, '').replace(/^(et|,)\s*/i, '').trim())
         .forEach((f) => { if (!allowed.has(f)) invalid.push(f); });
       return false;
     })
