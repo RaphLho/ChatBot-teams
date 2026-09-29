@@ -5,17 +5,14 @@ import session from 'express-session';
 import { BotFrameworkAdapter } from 'botbuilder';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 import { getAuthCodeUrl, acquireTokenByCode, getLogoutUrl } from './msalClient.js';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
-const mammoth = require('mammoth');
-const xlsx = require('xlsx');
 import { Mistral } from '@mistralai/mistralai';
 import RAGBot from './bot.js';
 import botStats, { recordUsage, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount } from './stats.js';
 import { listOneDriveFiles, downloadFilesBuffers, getOneDriveFolderUrl } from './onedriveClient.js';
 import { loadCache, saveCache } from './cacheManager.js';
+import { fileToChunks } from './ingestion.js';
+import { BM25Index } from './ragBoost.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,7 +47,7 @@ app.use(session({
 
 // --- CATEGORISATION DES DOCUMENTS (Étudiant / Collaborateur) ---
 // Déduite du chemin OneDrive du document (dossier "Etudiant" ou "Collaborateur" à la racine
-// du dossier indexé). Calculée à la volée à partir de "source" plutôt que persistée, pour
+// du dossier indexé). Calculée à la volée à partir de "path" plutôt que persistée, pour
 // rester valable même sur un cache constitué avant l'ajout de cette fonctionnalité.
 function getCategoryFromPath(fullPath) {
     const segments = (fullPath || '').split('/');
@@ -59,23 +56,37 @@ function getCategoryFromPath(fullPath) {
     return 'autre';
 }
 
-// --- DECOUPAGE DU TEXTE ---
-function splitText(text, chunkSize = 600, overlap = 100) {
-    const chunks = [];
-    let start = 0;
-    while (start < text.length) {
-        const end = Math.min(start + chunkSize, text.length);
-        chunks.push(text.slice(start, end));
-        start += chunkSize - overlap;
-    }
-    return chunks;
-}
-
 // --- MOTEUR VECTORIEL 100% RAM ---
 class LocalRamVectorStore {
     constructor(mistralClient) {
         this.mistralClient = mistralClient;
         this.documents = [];
+        this.indexes = new Map();
+        this.indexVersion = null;
+    }
+
+    /**
+     * Remplace les blocs de la base et reconstruit les index lexicaux (BM25), un par mode, avec
+     * le même filtrage que la recherche vectorielle. Appelé après chaque synchronisation et après
+     * chargement du cache disque. indexVersion change à chaque appel : il invalide le cache de
+     * réponses du bot (une réponse n'est réutilisée que sur la base qui l'a produite).
+     */
+    setDocuments(documents) {
+        this.documents = documents;
+        const byCategory = { etudiant: [], collaborateur: [] };
+        for (const doc of documents) byCategory[getCategoryFromPath(doc.path)]?.push(doc);
+        const build = (docs) => ({ bm25: new BM25Index(docs), chunksById: new Map(docs.map(d => [d.id, d])) });
+        this.indexes = new Map([
+            ['etudiant', build(byCategory.etudiant)],
+            ['collaborateur', build(byCategory.collaborateur)],
+            [null, build(documents)],
+        ]);
+        this.indexVersion = `${Date.now().toString(36)}-${documents.length}`;
+    }
+
+    /** @param {'etudiant'|'collaborateur'|null} category */
+    getIndex(category = null) {
+        return this.indexes.get(category || null) || this.indexes.get(null);
     }
 
     async addDocuments(chunks, onProgress = () => { }) {
@@ -102,14 +113,10 @@ class LocalRamVectorStore {
 
                     const response = await this.mistralClient.embeddings.create({
                         model: 'mistral-embed',
-                        inputs: batch.map(c => c.text),
+                        inputs: batch.map(c => c.embedText),
                     });
                     batch.forEach((chunk, j) => {
-                        this.documents.push({
-                            text: chunk.text,
-                            source: chunk.source,
-                            embedding: response.data[j].embedding
-                        });
+                        this.documents.push({ ...chunk, embedding: response.data[j].embedding });
                     });
                     // Tracker les tokens d'embedding
                     if (response.usage) {
@@ -135,28 +142,35 @@ class LocalRamVectorStore {
     }
 
     /**
-     * @param {string} query
-     * @param {number} k
-     * @param {'etudiant'|'collaborateur'|null} category - Si fourni, ne recherche que parmi les
-     *   documents dont le chemin OneDrive appartient au dossier "Etudiant" ou "Collaborateur" correspondant.
+     * Un seul appel d'embedding pour tous les textes d'une question (question, requête étendue,
+     * contexte de suivi) : le bot ne fait jamais plus d'un appel mistral-embed par question.
+     * @param {string[]} texts
+     * @returns {Promise<number[][]>}
      */
-    async similaritySearch(query, k = 3, category = null) {
-        const pool = category
-            ? this.documents.filter(doc => getCategoryFromPath(doc.source) === category)
-            : this.documents;
-
-        if (pool.length === 0) return [];
-
+    async embed(texts) {
         const response = await this.mistralClient.embeddings.create({
             model: 'mistral-embed',
-            inputs: [query],
+            inputs: texts,
         });
         // Tracker les tokens d'embedding de recherche
         if (response.usage) {
             const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
             recordUsage(embTk, 0, 'embedding_search', '', '', false, null, 'mistral-embed');
         }
-        const queryVector = response.data[0].embedding;
+        return response.data.map(d => d.embedding);
+    }
+
+    /**
+     * @param {number[]} queryVector
+     * @param {number} k
+     * @param {'etudiant'|'collaborateur'|null} category - Si fourni, ne recherche que parmi les
+     *   documents dont le chemin OneDrive appartient au dossier "Etudiant" ou "Collaborateur" correspondant.
+     * @returns {{id: string, score: number}[]}
+     */
+    vectorSearch(queryVector, k = 30, category = null) {
+        const pool = category
+            ? this.documents.filter(doc => getCategoryFromPath(doc.path) === category)
+            : this.documents;
 
         const scores = pool.map(doc => {
             let dot = 0, normA = 0, normB = 0;
@@ -165,79 +179,11 @@ class LocalRamVectorStore {
                 normA += queryVector[i] ** 2;
                 normB += doc.embedding[i] ** 2;
             }
-            return { doc, score: dot / (Math.sqrt(normA) * Math.sqrt(normB)) };
+            return { id: doc.id, score: dot / (Math.sqrt(normA) * Math.sqrt(normB)) };
         });
 
         scores.sort((a, b) => b.score - a.score);
-        return scores.slice(0, k).map(r => r.doc);
-    }
-}
-
-// --- DECOUPAGE D'UN TABLEAU (CSV) EN BLOCS AVEC EN-TETE REPETE ---
-// Un découpage brut par caractères (splitText) coupe les lignes n'importe où et ne conserve
-// l'en-tête (noms de colonnes) que dans le premier bloc : tous les blocs suivants deviennent
-// illisibles hors contexte. Ici, on découpe ligne par ligne et on répète l'en-tête + le préfixe
-// (nom de feuille) dans CHAQUE bloc, pour que la recherche vectorielle puisse renvoyer n'importe
-// quel bloc de manière autonome, sans perdre le sens des colonnes.
-function chunkCsvWithHeader(csvText, prefix = "", chunkSize = 1200, overlapRows = 2) {
-    const lines = csvText.split(/\r?\n/).filter(l => l.length > 0);
-    if (lines.length === 0) return [];
-
-    const headerLine = lines[0];
-    const dataLines = lines.slice(1);
-    if (dataLines.length === 0) return [`${prefix}${headerLine}`];
-
-    const header = `${prefix}${headerLine}`;
-    const chunks = [];
-    let current = [];
-    let currentLen = header.length;
-
-    for (const line of dataLines) {
-        if (current.length > 0 && currentLen + line.length + 1 > chunkSize) {
-            chunks.push([header, ...current].join('\n'));
-            current = current.slice(-overlapRows);
-            currentLen = header.length + current.reduce((sum, l) => sum + l.length + 1, 0);
-        }
-        current.push(line);
-        currentLen += line.length + 1;
-    }
-    if (current.length > 0) chunks.push([header, ...current].join('\n'));
-
-    return chunks;
-}
-
-// --- EXTRACTION DE TEXTE DEPUIS UN BUFFER ---
-// Retourne soit une chaîne de texte brut (documents non tabulaires, découpés ensuite par
-// splitText), soit un tableau de blocs déjà découpés avec en-tête répétée (CSV/Excel), pour
-// éviter la perte de colonnes décrite dans chunkCsvWithHeader ci-dessus.
-async function extractTextFromBuffer(buffer, ext) {
-    switch (ext) {
-        case '.pdf':
-            const pdfData = await pdfParse(buffer);
-            return pdfData.text;
-        case '.md':
-        case '.txt':
-        case '.texte':
-        case '.json':
-        case '.xml':
-            return buffer.toString('utf8');
-        case '.csv':
-            return chunkCsvWithHeader(buffer.toString('utf8'));
-        case '.docx':
-            const docxData = await mammoth.extractRawText({ buffer });
-            return docxData.value;
-        case '.xlsx':
-        case '.xls':
-            const workbook = xlsx.read(buffer, { type: 'buffer' });
-            let tableChunks = [];
-            for (const sheetName of workbook.SheetNames) {
-                const sheet = workbook.Sheets[sheetName];
-                const csv = xlsx.utils.sheet_to_csv(sheet);
-                tableChunks = tableChunks.concat(chunkCsvWithHeader(csv, `--- Feuille: ${sheetName} ---\n`));
-            }
-            return tableChunks;
-        default:
-            throw new Error(`Format non pris en charge : ${ext}`);
+        return scores.slice(0, k);
     }
 }
 
@@ -263,7 +209,7 @@ async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
             // il peut être en retard sur une suppression récente : relancer l'actualisation.
             log("⚠️  OneDrive injoignable : conservation temporaire du cache local (aucune purge possible).");
             const store = new LocalRamVectorStore(mistralClient);
-            store.documents = cache.documents;
+            store.setDocuments(cache.documents);
             botStats.totalChunksIndexed = cache.documents.length;
             botStats.totalFilesParsed = Object.keys(cache.files).length;
             return store;
@@ -305,7 +251,7 @@ async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
     const pathsToRemove = [...new Set([
         ...Object.keys(cache.files),
         ...Object.keys(cache.fileMeta),
-        ...cache.documents.map(d => d.source),
+        ...cache.documents.map(d => d.path),
     ])].filter(p => p && !currentRemotePaths.has(p));
 
     if (pathsToRemove.length > 0) {
@@ -323,15 +269,12 @@ async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
         for (const doc of downloadedDocs) {
             log(`📄 Traitement : ${doc.name}`);
             try {
-                const extracted = await extractTextFromBuffer(doc.buffer, doc.ext);
-                // CSV/Excel arrivent déjà découpés (en-tête répétée dans chaque bloc, voir
-                // chunkCsvWithHeader) ; les autres formats sont une chaîne à découper ici.
-                const chunks = Array.isArray(extracted)
-                    ? extracted
-                    : (extracted && extracted.trim().length > 0 ? splitText(extracted, 600, 100) : []);
+                // Excel : une fiche par colonne d'étape ; Word : blocs par titres ; autres formats :
+                // découpage texte. Tous les blocs portent leur fil d'Ariane (cf. src/ingestion.js).
+                const chunks = await fileToChunks(doc.buffer, doc.ext, doc.fullPath);
 
                 if (chunks.length > 0) {
-                    chunks.forEach(c => newChunks.push({ text: c, source: doc.fullPath }));
+                    newChunks.push(...chunks);
                 } else {
                     log(`   ⚠️ Document vide ou illisible : ${doc.name}`);
                 }
@@ -352,8 +295,8 @@ async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
     // conservé que si son fichier source existe encore en ligne et n'a pas changé (les fichiers
     // modifiés viennent d'être re-vectorisés dans newChunks).
     let updatedDocuments = cache.documents.filter(doc =>
-        currentRemotePaths.has(doc.source) &&
-        !filesToDownload.some(f => f.fullPath === doc.source)
+        currentRemotePaths.has(doc.path) &&
+        !filesToDownload.some(f => f.fullPath === doc.path)
     );
 
     if (newChunks.length > 0) {
@@ -367,7 +310,7 @@ async function initKnowledgeBase(mistralClient, onProgress = () => { }) {
         delete cache.fileMeta[p];
     }
 
-    store.documents = updatedDocuments;
+    store.setDocuments(updatedDocuments);
     cache.documents = updatedDocuments;
     saveCache(cache);
 
@@ -722,8 +665,8 @@ app.get('/api/stats/files', requireStatsAuthApi, (req, res) => {
             : parts.join('/');
 
         const meta = (cache.fileMeta && cache.fileMeta[filePath]) || {};
-        const chunks = documents.filter(d => d.source === filePath);
-        const textLength = chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
+        const chunks = documents.filter(d => d.path === filePath);
+        const textLength = chunks.reduce((acc, c) => acc + (c.body ? c.body.length : 0), 0);
         const size = (typeof meta.size === 'number' && meta.size > 0) ? meta.size : (textLength > 0 ? textLength : 1024);
         return {
             fileName,
@@ -750,14 +693,14 @@ app.get('/api/stats/file-content', requireStatsAuthApi, (req, res) => {
 
     const cache = loadCache();
     const documents = cache.documents || [];
-    const chunks = documents.filter(d => d.source === filePath);
+    const chunks = documents.filter(d => d.path === filePath);
     const meta = (cache.fileMeta && cache.fileMeta[filePath]) || {};
     const parts = filePath.split('/');
     const fileName = parts.pop();
     const folder = parts.pop() || '';
     const lastModified = cache.files?.[filePath] || meta.lastModified;
 
-    const textLength = chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
+    const textLength = chunks.reduce((acc, c) => acc + (c.body ? c.body.length : 0), 0);
     const size = (typeof meta.size === 'number' && meta.size > 0) ? meta.size : textLength;
 
     res.json({
@@ -769,10 +712,10 @@ app.get('/api/stats/file-content', requireStatsAuthApi, (req, res) => {
         chunksCount: chunks.length,
         chunks: chunks.map((c, idx) => ({
             index: idx + 1,
-            text: c.text,
-            length: c.text ? c.text.length : 0
+            text: c.source !== c.file ? `${c.source}\n${c.body}` : c.body,
+            length: c.body ? c.body.length : 0
         })),
-        fullText: chunks.map(c => c.text).join('\n\n')
+        fullText: chunks.map(c => c.body).join('\n\n')
     });
 });
 
