@@ -1,11 +1,41 @@
 import botbuilder from 'botbuilder';
-import botStats, { recordUsage } from './stats.js';
+import botStats, { recordUsage, recordLocalAnswer } from './stats.js';
+import {
+    expandQuery, retrieve, ragOptionsFromEnv, formatExtraits, trimHistory, checkCitations, AnswerCache,
+} from './ragBoost.js';
 const { ActivityHandler } = botbuilder;
 
 // Mémoire courte : historique des conversations par utilisateur (en RAM)
 const userHistory = new Map();
-// Cache de réponses pour éviter de rappeler Mistral sur la même question
-const responseCache = new Map();
+// Cache de réponses pour éviter de rappeler Mistral sur la même question (clé : mode + formation
+// + question normalisée + version de l'index, cf. askQuestion)
+const answerCache = new AnswerCache();
+
+// Paramètres de la recherche (RAG_TOKEN_BUDGET, RAG_MAX_CHUNKS, RAG_RELATIVE_CUT, RAG_MIN_VECTOR)
+const RAG_OPTIONS = ragOptionsFromEnv();
+
+// Paramètres de génération : réponses factuelles et courtes (3 à 8 lignes demandées par le prompt)
+const CHAT_TEMPERATURE = 0.1;
+const CHAT_MAX_TOKENS = 400;
+
+// Score de fusion (RRF, k = 60) atteint quand le bloc est dans le top 3 des deux moteurs à la fois
+const STRONG_TOP_SCORE = 1 / 61 + 1 / 63;
+
+// Premier bloc « très pertinent » : titre de colonne/section cité entre guillemets, ou bloc en
+// tête des recherches vectorielle et lexicale. Sert à repérer les replis suspects (stats).
+function isStrongTop(top) {
+    return !!top && (top.phrase >= 3 || (top.vector !== null && top.bm25 !== null && top.score >= STRONG_TOP_SCORE));
+}
+
+function cosine(a, b) {
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] ** 2;
+        normB += b[i] ** 2;
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 // Seuil de similarité cosinus (embeddings) au-delà duquel deux questions consécutives sont
 // considérées comme portant sur le même sujet. En-dessous, la nouvelle question est traitée comme
@@ -274,63 +304,120 @@ class RAGBot extends ActivityHandler {
      *   de savoir à qui il parle sans le redemander, et fait apparaître son nom dans les statistiques.
      */
     async askQuestion(userQuestion, userId, mode = null, profile = null) {
-        // 1. Vérification dans le cache RAM (le cache est séparé par mode et par formation/rôle
-        // déclaré : la réponse peut légitimement différer selon la formation de la personne, cf.
-        // buildFormationBlock — « Réponse pour : [formation]. »)
-        const profileKey = mode === 'collaborateur'
-            ? sanitizeProfileField(profile?.role).toLowerCase()
-            : sanitizeProfileField(profile?.formation).toLowerCase();
-        const cacheKey = `${mode || 'default'}::${profileKey}::${userQuestion.toLowerCase().replace(/\s+/g, '_')}`;
-        if (responseCache.has(cacheKey)) {
-            const cached = responseCache.get(cacheKey);
-            botStats.cacheHits += 1;
-            this._updateHistory(userId, userQuestion, cached);
-            return cached;
-        }
-
-        // 2. Détection de continuité de sujet : la nouvelle question poursuit-elle la précédente,
-        // ou est-elle totalement indépendante ? (ex: "et pour X ?" après une réponse sur Y)
+        const displayName = getProfileDisplayName(profile);
         const history = userHistory.get(userId) || [];
+        const previous = history[history.length - 1] || null;
+
+        // 1. Cache de réponses (0 token LLM). Séparé par mode et par formation/rôle déclaré (la
+        // réponse peut légitimement différer selon la formation, cf. « Réponse pour : [formation]. »)
+        // et invalidé à chaque synchronisation (indexVersion). Consulté uniquement pour une question
+        // sans historique transmis : sans historique du tout, avant tout appel API ; sinon après la
+        // détection de continuité (plus bas).
+        const profileKey = mode === 'collaborateur'
+            ? sanitizeProfileField(profile?.role)
+            : sanitizeProfileField(profile?.formation);
+        const cacheKey = answerCache.key({
+            mode: mode || 'default',
+            formation: profileKey,
+            question: userQuestion,
+            indexVersion: this.vectorStore?.indexVersion || 'none',
+        });
+        if (!previous) {
+            const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName);
+            if (hit) return hit;
+        }
+
+        // 2. UN SEUL appel d'embedding pour toute la question : la question (continuité de sujet),
+        // sa forme étendue (sigles → forme longue) pour la recherche et, s'il y a un échange
+        // précédent, le contexte de suivi. Le vecteur de la question précédente est conservé dans
+        // l'historique : inutile de le recalculer.
+        const followUpContext = previous ? `${previous.question} ${userQuestion}` : null;
+        const inputs = [...new Set([
+            userQuestion,
+            expandQuery(userQuestion),
+            followUpContext && expandQuery(followUpContext),
+            previous && !previous.vector ? previous.question : null,
+        ].filter(Boolean))];
+        const vectors = new Map();
+        try {
+            const embedded = await callWithRetry(() => this._embed(inputs), 'embeddings.create');
+            inputs.forEach((text, i) => vectors.set(text, embedded[i]));
+        } catch (e) {
+            // Sans embedding, la recherche lexicale (BM25) reste disponible.
+            console.error("Erreur lors du calcul des embeddings:", e.message);
+        }
+
+        // 3. Détection de continuité de sujet : la nouvelle question poursuit-elle la précédente,
+        // ou est-elle totalement indépendante ? (ex: "et pour X ?" après une réponse sur Y)
         let isFollowUp = false;
-        if (history.length > 0) {
-            isFollowUp = await this._isRelatedToPrevious(userQuestion, history[history.length - 1].question);
-        }
-
-        // Recherche des extraits de cours (vectorielle). On n'incorpore la question précédente dans
-        // la recherche QUE si la question actuelle en est réellement la suite (sinon on pollue la
-        // recherche sémantique avec un sujet différent).
-        let searchContext = userQuestion;
-        if (isFollowUp) {
-            searchContext = `${history[history.length - 1].question} ${userQuestion}`;
-        }
-
-        let contextDocs = "";
-        if (this.vectorStore) {
-            try {
-                const results = await this.vectorStore.similaritySearch(searchContext, 5, mode);
-                if (results.length > 0) {
-                    contextDocs = results
-                        .map(r => `[Source: ${r.source.split('/').pop()}]\n${r.text}`)
-                        .join("\n\n---\n\n");
-                }
-            } catch (e) {
-                console.error("Erreur de recherche vectorielle:", e.message);
+        if (previous) {
+            const current = vectors.get(userQuestion);
+            const before = previous.vector || vectors.get(previous.question);
+            // En cas d'erreur, on préfère conserver le contexte plutôt que le perdre à tort.
+            isFollowUp = current && before ? cosine(current, before) >= TOPIC_SIMILARITY_THRESHOLD : true;
+            if (!isFollowUp) {
+                const hit = this._serveFromCache(cacheKey, userId, userQuestion, displayName, vectors.get(userQuestion));
+                if (hit) return hit;
             }
         }
 
-        // 3. Construction des messages avec l'historique NATIF
+        // 4. Recherche hybride (vectorielle + BM25 + expressions entre guillemets), filtrée par
+        // mode. On n'incorpore la question précédente dans la recherche QUE si la question actuelle
+        // en est réellement la suite (sinon on pollue la recherche avec un sujet différent).
+        const searchContext = isFollowUp ? followUpContext : userQuestion;
+        const index = this.vectorStore?.getIndex(mode);
+        let retrieval = null;
+        if (index) {
+            retrieval = await retrieve({
+                question: searchContext,
+                bm25: index.bm25,
+                chunksById: index.chunksById,
+                vectorSearch: (query) => {
+                    const vector = vectors.get(query);
+                    return vector ? this.vectorStore.vectorSearch(vector, 30, mode) : [];
+                },
+                options: RAG_OPTIONS,
+            });
+        }
+        const ragStats = retrieval ? {
+            chunks: retrieval.chunks.length,
+            extraitsTokens: retrieval.tokens,
+            top: retrieval.top ? {
+                vector: retrieval.top.vector, bm25: retrieval.top.bm25,
+                phrase: retrieval.top.phrase, score: retrieval.top.score,
+            } : null,
+            confident: retrieval.confident,
+            followUp: isFollowUp,
+        } : null;
+
+        // 4.b Aucun extrait assez pertinent : formule de repli du mode, SANS appel LLM.
+        if (retrieval && (!retrieval.confident || retrieval.chunks.length === 0)) {
+            const fallback = mode === 'collaborateur' ? FALLBACK_COLLABORATEUR : FALLBACK_ETUDIANT;
+            console.log('📊 Repli sans appel LLM (aucun extrait assez pertinent) [SANS RÉPONSE]');
+            recordLocalAnswer({
+                userId, question: userQuestion, answer: fallback, displayName, isNoAnswer: true,
+                local: 'fallback', rag: { ...ragStats, llmSkipped: true },
+            });
+            this._updateHistory(userId, userQuestion, fallback, vectors.get(userQuestion));
+            return fallback;
+        }
+
+        // 5. Construction des messages avec l'historique NATIF
         const systemPrompt = this._buildSystemPrompt(mode);
 
         let messages = [{ role: 'system', content: systemPrompt }];
 
         // Historique : transmis uniquement si la question actuelle poursuit réellement le sujet
         // précédent. Sinon, le modèle ne voit même pas l'ancien échange et ne peut donc pas y faire
-        // référence à tort.
+        // référence à tort. Allégé (citations retirées, réponses tronquées) par trimHistory.
         if (isFollowUp) {
-            for (const turn of history) {
-                messages.push({ role: 'user', content: turn.question });
-                messages.push({ role: 'assistant', content: turn.answer });
-            }
+            messages.push(...trimHistory(
+                history.flatMap(turn => [
+                    { role: 'user', content: turn.question },
+                    { role: 'assistant', content: turn.answer },
+                ]),
+                { maxTurns: 2, maxAssistantChars: 350 }
+            ));
         }
 
         // Message final : identité déclarée, extraits documentaires et question balisés séparément
@@ -341,23 +428,30 @@ class RAGBot extends ActivityHandler {
         const identityBlock = buildIdentityBlock(mode, profile);
         const userPromptParts = [];
         if (identityBlock) userPromptParts.push(identityBlock);
-        if (contextDocs) userPromptParts.push(`<EXTRAITS>\n${contextDocs}\n</EXTRAITS>`);
+        if (retrieval?.chunks.length) userPromptParts.push(formatExtraits(retrieval.chunks));
         userPromptParts.push(`<QUESTION>\n${userQuestion}\n</QUESTION>`);
 
         messages.push({ role: 'user', content: userPromptParts.join('\n\n') });
 
-        // 4. Appel à Mistral (avec retry automatique sur 429)
+        // 6. Appel à Mistral (avec retry automatique sur 429) : un seul appel par question.
         const requestStartTime = Date.now();
         const chatResponse = await callWithRetry(
             () => this.mistralClient.chat.complete({
                 model: 'mistral-small-latest',
-                messages: messages
+                messages: messages,
+                temperature: CHAT_TEMPERATURE,
+                maxTokens: CHAT_MAX_TOKENS,
             }),
             'chat.complete'
         );
         const responseTimeMs = Date.now() - requestStartTime;
 
-        let finalAnswer = chatResponse.choices[0].message.content;
+        // Contrôle des citations : les noms de fichiers cités hors des extraits envoyés sont retirés.
+        const rawAnswer = chatResponse.choices[0].message.content;
+        const citations = retrieval
+            ? checkCitations(rawAnswer, retrieval.chunks)
+            : { text: rawAnswer, invalid: [], suspect: false };
+        let finalAnswer = citations.text;
         let isNonCompliant = false;
         let isNoAnswer = false;
 
@@ -368,31 +462,57 @@ class RAGBot extends ActivityHandler {
         }
 
         // Détection de la formule de repli « je ne sais pas » (balise ajoutée par les prompts
-        // système, cf. RÈGLE D'ANCRAGE ET FORMULE DE REPLI), pour affichage d'un visuel dédié
+        // système, cf. ANCRAGE ET FORMULE DE REPLI), pour affichage d'un visuel dédié
         // dans l'historique des statistiques.
         if (finalAnswer.includes('[SANS_REPONSE]')) {
             isNoAnswer = true;
             finalAnswer = finalAnswer.replace('[SANS_REPONSE]', '').trim();
         }
 
-        // 4.b Enregistrement des tokens (avec le nom déclaré, pour l'affichage dans les statistiques)
-        const displayName = getProfileDisplayName(profile);
+        if (ragStats) {
+            ragStats.invalidCitations = citations.invalid.length;
+            ragStats.suspect = citations.suspect;
+            // « Repli suspect » : le modèle dit ne pas savoir alors que le premier extrait était
+            // très pertinent (probable refus abusif, à examiner dans l'historique).
+            ragStats.suspectFallback = isNoAnswer && isStrongTop(retrieval.top);
+            if (citations.invalid.length) console.warn(`⚠️ Citation(s) hors extraits retirée(s) : ${citations.invalid.join(', ')}`);
+        }
+
+        // 6.b Enregistrement des tokens (avec le nom déclaré, pour l'affichage dans les statistiques)
         const usage = chatResponse.usage;
         if (usage) {
             const promptTk = usage.promptTokens || usage.prompt_tokens || 0;
             const completionTk = usage.completionTokens || usage.completion_tokens || 0;
             console.log(`📊 Tokens utilisés — prompt: ${promptTk}, completion: ${completionTk}${isNonCompliant ? ' [HORS SUJET DÉTECTÉ]' : ''}${isNoAnswer ? ' [SANS RÉPONSE]' : ''}`);
-            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer);
+            recordUsage(promptTk, completionTk, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer, ragStats);
         } else {
             console.warn('⚠️ Pas de données usage dans la réponse Mistral');
-            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer);
+            recordUsage(0, 0, userId, userQuestion, finalAnswer, isNonCompliant, responseTimeMs, 'mistral-small-latest', displayName, isNoAnswer, ragStats);
         }
 
-        // 5. Mise en cache et historique
-        responseCache.set(cacheKey, finalAnswer);
-        this._updateHistory(userId, userQuestion, finalAnswer);
+        // 7. Mise en cache (questions sans historique transmis, hors réponses [NON-CONFORME]) et historique
+        if (!isFollowUp && !isNonCompliant) {
+            answerCache.set(cacheKey, { answer: finalAnswer, isNoAnswer });
+        }
+        this._updateHistory(userId, userQuestion, finalAnswer, vectors.get(userQuestion));
 
         return finalAnswer;
+    }
+
+    /**
+     * Sert une réponse depuis le cache si elle existe (0 token LLM), et l'enregistre comme telle
+     * dans les statistiques. Retourne la réponse, ou null si absente du cache.
+     */
+    _serveFromCache(cacheKey, userId, question, displayName, vector = null) {
+        const cached = answerCache.get(cacheKey);
+        if (!cached) return null;
+        botStats.cacheHits += 1;
+        recordLocalAnswer({
+            userId, question, answer: cached.answer, displayName, isNoAnswer: cached.isNoAnswer,
+            local: 'cache', rag: { cached: true },
+        });
+        this._updateHistory(userId, question, cached.answer, vector);
+        return cached.answer;
     }
 
     /**
@@ -407,47 +527,31 @@ class RAGBot extends ActivityHandler {
     }
 
     /**
-     * Détermine si `currentQuestion` porte sur le même sujet que `previousQuestion`, via la
-     * similarité cosinus de leurs embeddings. Permet de ne pas mélanger deux sujets sans rapport
-     * dans une même conversation (ex: une question RH suivie d'une question sur un cours).
+     * Calcule les embeddings (mistral-embed) de plusieurs textes en un seul appel API.
+     * @param {string[]} texts
+     * @returns {Promise<number[][]>}
      */
-    async _isRelatedToPrevious(currentQuestion, previousQuestion) {
-        try {
-            const response = await callWithRetry(
-                () => this.mistralClient.embeddings.create({
-                    model: 'mistral-embed',
-                    inputs: [currentQuestion, previousQuestion],
-                }),
-                'embeddings.create'
-            );
-            if (response.usage) {
-                const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
-                recordUsage(embTk, 0, 'embedding_topic_check', '', '', false, null, 'mistral-embed');
-            }
-            const [vecA, vecB] = response.data.map(d => d.embedding);
-            let dot = 0, normA = 0, normB = 0;
-            for (let i = 0; i < vecA.length; i++) {
-                dot += vecA[i] * vecB[i];
-                normA += vecA[i] ** 2;
-                normB += vecB[i] ** 2;
-            }
-            const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-            return similarity >= TOPIC_SIMILARITY_THRESHOLD;
-        } catch (e) {
-            console.error("Erreur lors de la vérification de continuité du sujet:", e.message);
-            // En cas d'erreur, on préfère conserver le contexte plutôt que le perdre à tort.
-            return true;
+    async _embed(texts) {
+        const response = await this.mistralClient.embeddings.create({
+            model: 'mistral-embed',
+            inputs: texts,
+        });
+        if (response.usage) {
+            const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
+            recordUsage(embTk, 0, 'embedding_search', '', '', false, null, 'mistral-embed');
         }
+        return response.data.map(d => d.embedding);
     }
 
-    _updateHistory(userId, question, answer) {
+    _updateHistory(userId, question, answer, vector = null) {
         if (!userHistory.has(userId)) userHistory.set(userId, []);
         const history = userHistory.get(userId);
-        
+
         // Troncature de la réponse pour économiser des tokens dans le futur
         const truncatedAnswer = answer.length > 300 ? answer.substring(0, 300) + "... [Texte tronqué]" : answer;
-        
-        history.push({ question, answer: truncatedAnswer });
+
+        // Le vecteur de la question sert à la détection de continuité de la question suivante
+        history.push({ question, answer: truncatedAnswer, vector });
         // Garder uniquement les 2 derniers tours de conversation
         if (history.length > 2) history.shift();
     }

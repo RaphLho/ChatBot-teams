@@ -142,25 +142,8 @@ class LocalRamVectorStore {
     }
 
     /**
-     * Un seul appel d'embedding pour tous les textes d'une question (question, requête étendue,
-     * contexte de suivi) : le bot ne fait jamais plus d'un appel mistral-embed par question.
-     * @param {string[]} texts
-     * @returns {Promise<number[][]>}
-     */
-    async embed(texts) {
-        const response = await this.mistralClient.embeddings.create({
-            model: 'mistral-embed',
-            inputs: texts,
-        });
-        // Tracker les tokens d'embedding de recherche
-        if (response.usage) {
-            const embTk = response.usage.promptTokens || response.usage.prompt_tokens || response.usage.totalTokens || response.usage.total_tokens || 0;
-            recordUsage(embTk, 0, 'embedding_search', '', '', false, null, 'mistral-embed');
-        }
-        return response.data.map(d => d.embedding);
-    }
-
-    /**
+     * Recherche vectorielle à partir d'un vecteur déjà calculé : le bot calcule tous ses
+     * embeddings d'une question en un seul appel mistral-embed (cf. askQuestion dans bot.js).
      * @param {number[]} queryVector
      * @param {number} k
      * @param {'etudiant'|'collaborateur'|null} category - Si fourni, ne recherche que parmi les
