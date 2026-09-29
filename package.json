@@ -5,7 +5,9 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test",
+    "eval:retrieval": "node scripts/evalRetrieval.js"
   },
   "dependencies": {
     "@azure/identity": "^1.1.0",

@@ -107,3 +107,6 @@ credentials/
 *.swp
 coverage/
 .nyc_output/
+
+# Évaluation hors ligne (cache des embeddings mistral-embed)
+.eval-embeddings.json

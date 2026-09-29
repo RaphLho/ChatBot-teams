@@ -369,9 +369,11 @@ export function formatExtraits(chunks) {
 const envNumber = (v, def) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? def : Number(v));
 
 // Paramètres réglables par variables d'environnement (RAG_MIN_VECTOR vide = seuil désactivé).
+// Budget par défaut 1 150 tokens (et non 1 400) : mesuré sur le jeu de 118 questions, c'est la
+// valeur qui garde les extraits sous le volume de l'ancienne chaîne (top 5 fixe ≈ 1 040 tokens).
 export function ragOptionsFromEnv(env = process.env) {
   return {
-    tokenBudget: envNumber(env.RAG_TOKEN_BUDGET, 1400),
+    tokenBudget: envNumber(env.RAG_TOKEN_BUDGET, 1150),
     maxChunks: envNumber(env.RAG_MAX_CHUNKS, 5),
     relativeCut: envNumber(env.RAG_RELATIVE_CUT, 0.3),
     minVector: envNumber(env.RAG_MIN_VECTOR, null),
