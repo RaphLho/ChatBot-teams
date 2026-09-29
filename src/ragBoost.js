@@ -222,6 +222,10 @@ const stem = (t) => {
 export const tokenize = (s) =>
   normalize(s).split(/[^a-z0-9+]+/).filter((t) => t.length > 1 && !STOP.has(t)).map(stem);
 
+// Expressions entre guillemets de la question, normalisées
+export const quotedPhrases = (query) => [...String(query).matchAll(/[«“"]\s*([^»”"]{3,80}?)\s*[»”"]/g)]
+  .map((m) => normalize(m[1]).replace(/[^a-z0-9+]+/g, ' ').trim()).filter(Boolean);
+
 export class BM25Index {
   constructor(chunks, { k1 = 1.2, b = 0.75 } = {}) {
     this.k1 = k1; this.b = b;
@@ -259,8 +263,7 @@ export class BM25Index {
   // Un bloc dont le TITRE (colonne, section) est l'expression pèse 3 fois plus
   // qu'un bloc qui la mentionne seulement dans son texte.
   phraseHits(query) {
-    const phrases = [...String(query).matchAll(/[«“"]\s*([^»”"]{3,80}?)\s*[»”"]/g)]
-      .map((m) => normalize(m[1]).replace(/[^a-z0-9+]+/g, ' ').trim()).filter(Boolean);
+    const phrases = quotedPhrases(query);
     if (!phrases.length) return [];
     return this.docs
       .map((d) => {
@@ -341,7 +344,7 @@ export function hybridRank({ query, vectorResults = [], bm25, k = 60,
 // - Si rien n'est assez pertinent : pas d'appel LLM, formule de repli directe.
 //   minVector est à calibrer sur le jeu de test (voir scripts/evalRetrieval.js).
 export function selectChunks(fused, chunksById, {
-  maxChunks = 5, tokenBudget = 1400, relativeCut = 0.3, minVector = null, exactCap = 3,
+  maxChunks = 5, tokenBudget = 1400, relativeCut = 0.3, minVector = null, exactCap = 3, quoted = 0,
 } = {}) {
   const top = fused[0];
   const confident = !!top && (
@@ -351,7 +354,9 @@ export function selectChunks(fused, chunksById, {
   );
   // Titre de colonne cité entre guillemets et retrouvé à l'identique : la question vise
   // cette étape, on limite le bruit (colonnes homonymes d'autres kanbans). RAG_EXACT_CAP.
-  const cap = top && top.phrase >= 5 ? Math.min(maxChunks, exactCap) : maxChunks;
+  // Jamais moins de blocs que d'expressions citées : une question qui cite 4 colonnes garde
+  // ses 4 colonnes (quoted = nombre d'expressions entre guillemets, fourni par retrieve).
+  const cap = top && top.phrase >= 5 ? Math.min(maxChunks, Math.max(exactCap, quoted)) : maxChunks;
   const chunks = [];
   let used = 0;
   for (const f of fused) {
@@ -397,7 +402,7 @@ export async function retrieve({ question, bm25, chunksById, vectorSearch = null
   const query = expandQuery(question);
   const vectorResults = vectorSearch ? await vectorSearch(query) : [];
   const fused = hybridRank({ query, vectorResults, bm25 });
-  const sel = selectChunks(fused, chunksById, options);
+  const sel = selectChunks(fused, chunksById, { ...options, quoted: new Set(quotedPhrases(query)).size });
   return { query, fused, top: fused[0] || null, ...sel };
 }
 
