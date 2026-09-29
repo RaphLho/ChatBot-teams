@@ -6,6 +6,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const STATS_FILE = path.join(__dirname, '../data/global_stats.json');
 
+// Compteurs de qualité de la recherche (RAG), par question. Champs optionnels : absents des
+// fichiers de statistiques antérieurs, complétés au chargement.
+function emptyRagCounters() {
+    return {
+        questions: 0,          // questions passées par la recherche (hors cache)
+        chunksSent: 0,         // total des blocs envoyés au LLM
+        extraitsTokens: 0,     // total des tokens d'extraits estimés
+        confident: 0,          // questions dont le premier bloc passe le seuil de confiance
+        fallbackNoLLM: 0,      // formules de repli servies sans appel LLM
+        cacheHits: 0,          // réponses servies depuis le cache (0 token)
+        invalidCitations: 0,   // noms de fichiers cités hors extraits (retirés de la réponse)
+        suspectAnswers: 0,     // réponses sans citation valide et sans balise
+        suspectFallbacks: 0,   // [SANS_REPONSE] du LLM alors que le premier bloc était très pertinent
+    };
+}
+
 // --- Statistiques Persistantes (Globales) ---
 let globalStats = {
     totalConversations: 0,
@@ -22,7 +38,8 @@ let globalStats = {
     chatCompletionTokens: 0,
     embedTokens: 0,
     chatRequests: 0,
-    embedRequests: 0
+    embedRequests: 0,
+    rag: emptyRagCounters()
 };
 
 if (fs.existsSync(STATS_FILE)) {
@@ -42,6 +59,7 @@ if (fs.existsSync(STATS_FILE)) {
         if (!globalStats.embedTokens) globalStats.embedTokens = 0;
         if (!globalStats.chatRequests) globalStats.chatRequests = 0;
         if (!globalStats.embedRequests) globalStats.embedRequests = 0;
+        globalStats.rag = { ...emptyRagCounters(), ...(globalStats.rag || {}) };
     } catch (e) {
         console.error("Erreur lors de la lecture des statistiques globales :", e);
     }
@@ -85,6 +103,7 @@ const botStats = {
         embedTokens: 0,
         chatRequests: 0,
         embedRequests: 0,
+        rag: emptyRagCounters(),
     },
 
     global: globalStats,
@@ -112,8 +131,9 @@ const MAX_HISTORY = 1000;
  * @param {string} model - Modèle utilisé ('mistral-small-latest' ou 'mistral-embed')
  * @param {string} displayName - Nom déclaré par la personne (popup de profil côté web), vide si inconnu
  * @param {boolean} isNoAnswer - Vrai si le bot a utilisé sa formule de repli « je ne sais pas »
+ * @param {object|null} rag - Détails de la recherche pour cette question (cf. trackRag), optionnel
  */
-function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest', displayName = '', isNoAnswer = false) {
+function recordUsage(promptTokens, completionTokens, userId = 'unknown', question = '', answer = '', isNonCompliant = false, responseTimeMs = null, model = 'mistral-small-latest', displayName = '', isNoAnswer = false, rag = null) {
     const pTokens = promptTokens || 0;
     const cTokens = completionTokens || 0;
     const totalTk = pTokens + cTokens;
@@ -135,6 +155,10 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
         responseTimeMs: hasTiming ? responseTimeMs : null,
         model
     };
+    if (rag) {
+        entry.rag = rag;
+        trackRag(rag);
+    }
 
     botStats.history.push(entry);
     if (botStats.history.length > MAX_HISTORY) {
@@ -196,6 +220,62 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
     globalStats.monthlyUsage[monthKey] += totalTk;
 
     // Sauvegarde sur disque
+    saveGlobalStats();
+}
+
+/**
+ * Met à jour les compteurs RAG (session + global) à partir des détails d'une question.
+ * @param {{chunks?: number, extraitsTokens?: number, confident?: boolean, llmSkipped?: boolean,
+ *   cached?: boolean, invalidCitations?: number, suspect?: boolean, suspectFallback?: boolean}} rag
+ */
+function trackRag(rag) {
+    for (const counters of [botStats.session.rag, globalStats.rag]) {
+        if (rag.cached) { counters.cacheHits += 1; continue; }
+        counters.questions += 1;
+        counters.chunksSent += rag.chunks || 0;
+        counters.extraitsTokens += rag.extraitsTokens || 0;
+        if (rag.confident) counters.confident += 1;
+        if (rag.llmSkipped) counters.fallbackNoLLM += 1;
+        counters.invalidCitations += rag.invalidCitations || 0;
+        if (rag.suspect) counters.suspectAnswers += 1;
+        if (rag.suspectFallback) counters.suspectFallbacks += 1;
+    }
+}
+
+/**
+ * Enregistre une réponse produite SANS appel LLM (cache de réponses ou formule de repli quand
+ * aucun extrait n'est assez pertinent). Elle apparaît dans l'historique avec 0 token, sans
+ * compter comme une requête Mistral.
+ * @param {{userId: string, question: string, answer: string, displayName?: string,
+ *   isNoAnswer?: boolean, local: 'cache'|'fallback', rag?: object}} params
+ */
+function recordLocalAnswer({ userId, question, answer, displayName = '', isNoAnswer = false, local, rag = {} }) {
+    const entry = {
+        timestamp: Date.now(),
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        userId,
+        displayName,
+        question,
+        answer,
+        isNonCompliant: false,
+        isNoAnswer,
+        responseTimeMs: null,
+        model: 'mistral-small-latest',
+        local,
+        rag,
+    };
+    botStats.history.push(entry);
+    if (botStats.history.length > MAX_HISTORY) botStats.history.shift();
+    if (isRealUser(userId)) {
+        sessionUniqueUserSet.add(userId);
+        if (!globalUniqueUserSet.has(userId)) {
+            globalUniqueUserSet.add(userId);
+            globalStats.uniqueUserIds.push(userId);
+        }
+    }
+    trackRag(rag);
     saveGlobalStats();
 }
 
@@ -292,4 +372,4 @@ function aggregateHistory(interval = 'hour') {
 }
 
 export default botStats;
-export { recordUsage, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount };
+export { recordUsage, recordLocalAnswer, aggregateHistory, aggregateByHourOfDay, aggregateByWeekday, getTopUsers, getSessionUniqueUsersCount };

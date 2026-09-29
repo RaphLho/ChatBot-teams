@@ -328,6 +328,52 @@
                 </div>
 
                 <!-- ============================================ -->
+                <!-- Qualité de la recherche (RAG), global          -->
+                <!-- ============================================ -->
+                <div class="section-title">Qualité de la recherche (RAG)</div>
+                <div class="kpi-grid">
+                    <div class="kpi-card kpi-prompt">
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Extraits envoyés / question</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Nombre moyen de blocs de documents transmis au modèle par question, et estimation des tokens correspondants. Le premier chiffre entre parenthèses est la part des questions dont le premier bloc passe le seuil de confiance.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-rag-chunks">0</span>
+                            <span class="kpi-sublabel" id="kpi-rag-tokens">0 token d'extraits</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-cache">
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Réponses sans appel LLM</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Réponses servies sans appeler mistral-small (0 token) : formule de repli quand aucun extrait n'est assez pertinent, ou réponse déjà en cache pour la même question sur la même base.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-rag-nollm">0</span>
+                            <span class="kpi-sublabel" id="kpi-rag-nollm-detail">0 repli · 0 cache</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-noncompliant">
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Citations invalides</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Noms de fichiers cités par le modèle alors qu'ils ne faisaient pas partie des extraits envoyés (retirés automatiquement de la réponse). « Suspectes » : réponses sans citation valide ni balise de repli.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-rag-invalid">0</span>
+                            <span class="kpi-sublabel" id="kpi-rag-suspect">0 réponse(s) suspecte(s)</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-speed">
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Replis suspects</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Réponses « je ne sais pas » du modèle alors que le premier extrait était très pertinent (titre de colonne ou de section cité, ou extrait en tête des deux moteurs de recherche). Indique un refus abusif à examiner dans l'historique.">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-rag-suspect-fallback">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================ -->
                 <!-- Répartition dans le temps                     -->
                 <!-- ============================================ -->
                 <div class="section-title">Consommation dans le temps</div>

@@ -567,6 +567,20 @@ async function loadStats() {
 
         document.getElementById('kpi-cache-hits').textContent = formatNumber(stats.cacheHits || 0);
 
+        // ---- Qualité de la recherche (RAG, global) ----
+        const rag = stats.global.rag || {};
+        const ragQuestions = rag.questions || 0;
+        const perQuestion = (v) => (ragQuestions > 0 ? (v || 0) / ragQuestions : 0);
+        document.getElementById('kpi-rag-chunks').textContent = perQuestion(rag.chunksSent).toFixed(1).replace('.', ',');
+        document.getElementById('kpi-rag-tokens').textContent =
+            `${formatNumber(Math.round(perQuestion(rag.extraitsTokens)))} tokens d'extraits (${formatPercent(perQuestion(rag.confident))} confiants)`;
+        document.getElementById('kpi-rag-nollm').textContent = formatNumber((rag.fallbackNoLLM || 0) + (rag.cacheHits || 0));
+        document.getElementById('kpi-rag-nollm-detail').textContent =
+            `${formatNumber(rag.fallbackNoLLM || 0)} repli(s) · ${formatNumber(rag.cacheHits || 0)} cache`;
+        document.getElementById('kpi-rag-invalid').textContent = formatNumber(rag.invalidCitations || 0);
+        document.getElementById('kpi-rag-suspect').textContent = `${formatNumber(rag.suspectAnswers || 0)} réponse(s) suspecte(s)`;
+        document.getElementById('kpi-rag-suspect-fallback').textContent = formatNumber(rag.suspectFallbacks || 0);
+
         // Uptime bar
         document.getElementById('uptime-display').textContent = formatUptime(stats.uptime);
         document.getElementById('files-parsed').textContent = stats.totalFilesParsed;
@@ -859,7 +873,10 @@ function renderHistoryEntries(entries, filter) {
 
     container.innerHTML = recent.map(entry => {
         const isChat = entry.model === 'mistral-small-latest';
-        const modelLabel = isChat ? 'mistral-small' : 'mistral-embed';
+        // Réponses servies sans appel LLM (cache ou formule de repli) : 0 token
+        const modelLabel = entry.local === 'cache' ? 'cache (0 token)'
+            : entry.local === 'fallback' ? 'repli sans LLM'
+            : isChat ? 'mistral-small' : 'mistral-embed';
         const modelClass = isChat ? 'chat' : 'embed';
 
         const question = entry.question || (isChat ? 'Pas de question' : 'Indexation / Embedding');
