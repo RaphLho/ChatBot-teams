@@ -111,3 +111,6 @@ coverage/
 # Évaluation hors ligne (cache des embeddings mistral-embed)
 .eval-embeddings.json
 test-reel.csv
+
+# Journal de débogage des extraits (RAG_DEBUG_LOG=1)
+data/rag-debug.jsonl*
