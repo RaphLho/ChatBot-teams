@@ -107,3 +107,12 @@ test('finalizeAnswer : ligne « Source : … » recopiée par le modèle retiré
   assert.match(inline.text, /^Le RDV est sous 1 semaine\.\n\nD'après/);
   assert.deepEqual(finalizeAnswer('x\nSource : Tips - Fonctionnalité des activités.docx', [kanban]).invalid, ['Tips - Fonctionnalité des activités.docx']);
 });
+
+test('selectChunks : blocs de code HTML après les blocs de procédure', () => {
+  const html = makeChunk('Signature.docx', 'Codes HTML des signatures › Signature Pigier', '<table class="x"><tr><td style="a">Nom</td></tr></table>', 0);
+  const markup = makeChunk('Signature.docx', 'Annexe', '<p><span style="color:red">x</span></p>', 1);
+  const steps = makeChunk('Signature.docx', 'Procédure en cinq étapes', 'Cliquez sur « ADD SIGNATURE », collez le code puis enregistrez.', 2);
+  const map = new Map([html, markup, steps].map((c) => [c.id, c]));
+  const fused = [html, markup, steps].map((c, i) => ({ id: c.id, score: 1 - i * 0.1, vector: 0.8, bm25: 1, phrase: 0 }));
+  assert.deepEqual(selectChunks(fused, map).chunks.map((c) => c.id), [steps.id, html.id, markup.id]);
+});

@@ -12,7 +12,8 @@ const CACHE_FILE = path.join(__dirname, '../data/vector_cache.json');
 //   1 (implicite) : { text, source, embedding }
 //   2 : { id, path, file, section, source, body, embedText, embedding } (cf. src/ingestion.js)
 //   3 : même format ; blocs Excel réordonnés (gabarits d'emails et textes de tâches en fin de bloc)
-export const CACHE_VERSION = 3;
+//   4 : même format ; blocs Word réduits au titre du document supprimés
+export const CACHE_VERSION = 4;
 
 const emptyCache = () => ({ version: CACHE_VERSION, files: {}, documents: [], fileMeta: {} });
 

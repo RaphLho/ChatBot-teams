@@ -194,7 +194,10 @@ export async function docxToChunks(buffer, file, { maxChars = 1400, minChars = 7
     buf += text + '\n';
   }
   flush();
-  return out;
+  // Bloc réduit au titre du document (paragraphe « Titre » avant le premier intitulé) : aucune
+  // information, mais il occupait une place d'extrait.
+  const title = normalize(file.replace(/\.[^.]+$/, '')).replace(/[^a-z0-9]+/g, ' ').trim();
+  return out.filter((c) => c.section || normalize(c.body).replace(/[^a-z0-9]+/g, ' ').trim() !== title);
 }
 
 // ================================================================
@@ -343,6 +346,14 @@ export function hybridRank({ query, vectorResults = [], bm25, k = 60,
 // - Coupe dès que la pertinence chute (inutile d'envoyer 5 blocs si 2 suffisent).
 // - Si rien n'est assez pertinent : pas d'appel LLM, formule de repli directe.
 //   minVector est à calibrer sur le jeu de test (voir scripts/evalRetrieval.js).
+// Bloc de code : section « Code(s) HTML… » ou texte composé pour un tiers au moins de balises.
+export function isCodeChunk(c) {
+  if (!c) return false;
+  if (/\bcodes? html\b/i.test(c.section || '')) return true;
+  const markup = (c.body.match(/<\/?[a-z][^>]*>/gi) || []).reduce((n, t) => n + t.length, 0);
+  return markup / Math.max(1, c.body.length) >= 0.33;
+}
+
 export function selectChunks(fused, chunksById, {
   maxChunks = 5, tokenBudget = 1400, relativeCut = 0.3, minVector = null, exactCap = 3, quoted = 0,
 } = {}) {
@@ -357,11 +368,17 @@ export function selectChunks(fused, chunksById, {
   // Jamais moins de blocs que d'expressions citées : une question qui cite 4 colonnes garde
   // ses 4 colonnes (quoted = nombre d'expressions entre guillemets, fourni par retrieve).
   const cap = top && top.phrase >= 5 ? Math.min(maxChunks, Math.max(exactCap, quoted)) : maxChunks;
+  // Blocs de code (signatures HTML…) après tous les autres blocs pertinents : longs et pauvres en
+  // consignes, ils prenaient la place des étapes de la procédure.
+  const relevant = top ? fused.filter((f) => f.score >= top.score * relativeCut) : [];
+  const ordered = [
+    ...relevant.filter((f) => !isCodeChunk(chunksById.get(f.id))),
+    ...relevant.filter((f) => isCodeChunk(chunksById.get(f.id))),
+  ];
   const chunks = [];
   let used = 0;
-  for (const f of fused) {
+  for (const f of ordered) {
     if (chunks.length >= cap) break;
-    if (chunks.length && f.score < top.score * relativeCut) break;
     const c = chunksById.get(f.id);
     if (!c) continue;
     const t = estimateTokens(c.source + c.body) + 6;
