@@ -11,7 +11,8 @@ const CACHE_FILE = path.join(__dirname, '../data/vector_cache.json');
 // d'embeddings sur tous les fichiers, comme une synchronisation normale).
 //   1 (implicite) : { text, source, embedding }
 //   2 : { id, path, file, section, source, body, embedText, embedding } (cf. src/ingestion.js)
-export const CACHE_VERSION = 2;
+//   3 : même format ; blocs Excel réordonnés (gabarits d'emails et textes de tâches en fin de bloc)
+export const CACHE_VERSION = 3;
 
 const emptyCache = () => ({ version: CACHE_VERSION, files: {}, documents: [], fileMeta: {} });
 

@@ -91,11 +91,17 @@ function columnChunks(rows, file, sheet, maxChars) {
       const next = si < stages.length - 1 ? clean(header[stages[si + 1]]) : null;
       lines.push(`Position : étape ${si + 1}/${stages.length}` +
         (prev ? ` ; précédente « ${prev} »` : '') + (next ? ` ; suivante « ${next} »` : ''));
+      const long = [];
       for (const r of block.slice(1)) {
         const label = clean(r[0]).replace(/\s*:\s*$/, '');
         const val = clean(r[c]);
-        if (label && val) lines.push(`${label} : ${val}`);   // cellules vides ignorées
+        if (!label || !val) continue;                         // cellules vides ignorées
+        // Gabarits d'emails / textes de tâches : en fin de bloc, pour que le premier
+        // morceau garde toutes les règles (délais, déplacements, conditions).
+        (/^(contenu email|texte de la (tache|tâche|notification))/i.test(label) ? long : lines)
+          .push(`${label} : ${val}`);
       }
+      lines.push(...long);
       if (lines.length <= 1) return;
       const section = `${sheet}${blocks.length > 1 ? ` (tableau ${bi + 1})` : ''} › Colonne « ${stage} »`;
       splitText(lines.join('\n'), maxChars).forEach((body, i) =>
@@ -335,7 +341,7 @@ export function hybridRank({ query, vectorResults = [], bm25, k = 60,
 // - Si rien n'est assez pertinent : pas d'appel LLM, formule de repli directe.
 //   minVector est à calibrer sur le jeu de test (voir scripts/evalRetrieval.js).
 export function selectChunks(fused, chunksById, {
-  maxChunks = 5, tokenBudget = 1400, relativeCut = 0.3, minVector = null,
+  maxChunks = 5, tokenBudget = 1400, relativeCut = 0.3, minVector = null, exactCap = 3,
 } = {}) {
   const top = fused[0];
   const confident = !!top && (
@@ -343,10 +349,13 @@ export function selectChunks(fused, chunksById, {
     (minVector === null ? true : (top.vector ?? 0) >= minVector) ||
     (top.bm25 !== null && top.vector !== null)          // les deux moteurs d'accord
   );
+  // Titre de colonne cité entre guillemets et retrouvé à l'identique : la question vise
+  // cette étape, on limite le bruit (colonnes homonymes d'autres kanbans). RAG_EXACT_CAP.
+  const cap = top && top.phrase >= 5 ? Math.min(maxChunks, exactCap) : maxChunks;
   const chunks = [];
   let used = 0;
   for (const f of fused) {
-    if (chunks.length >= maxChunks) break;
+    if (chunks.length >= cap) break;
     if (chunks.length && f.score < top.score * relativeCut) break;
     const c = chunksById.get(f.id);
     if (!c) continue;
@@ -375,6 +384,7 @@ export function ragOptionsFromEnv(env = process.env) {
   return {
     tokenBudget: envNumber(env.RAG_TOKEN_BUDGET, 1150),
     maxChunks: envNumber(env.RAG_MAX_CHUNKS, 5),
+    exactCap: envNumber(env.RAG_EXACT_CAP, 3),
     relativeCut: envNumber(env.RAG_RELATIVE_CUT, 0.3),
     minVector: envNumber(env.RAG_MIN_VECTOR, null),
   };

@@ -145,7 +145,7 @@ test('retrieve + formatExtraits : extraits numérotés avec leur source', async 
 });
 
 test('ragOptionsFromEnv : valeurs par défaut et surcharge', () => {
-  assert.deepEqual(ragOptionsFromEnv({}), { tokenBudget: 1150, maxChunks: 5, relativeCut: 0.3, minVector: null });
+  assert.deepEqual(ragOptionsFromEnv({}), { tokenBudget: 1150, maxChunks: 5, exactCap: 3, relativeCut: 0.3, minVector: null });
   assert.equal(ragOptionsFromEnv({ RAG_MIN_VECTOR: '0.73' }).minVector, 0.73);
   assert.equal(ragOptionsFromEnv({ RAG_MIN_VECTOR: '' }).minVector, null);
 });
