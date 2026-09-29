@@ -355,8 +355,8 @@
                     <div class="kpi-card kpi-noncompliant">
                         <div class="kpi-content">
                             <div class="kpi-label-row">
-                                <span class="kpi-label">Citations invalides</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Noms de fichiers cités par le modèle alors qu'ils ne faisaient pas partie des extraits envoyés (retirés automatiquement de la réponse). « Suspectes » : réponses sans citation valide ni balise de repli.">i</span>
+                                <span class="kpi-label">Citations inventées corrigées</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Noms de fichiers cités par le modèle alors qu'ils ne faisaient pas partie des extraits envoyés : retirés automatiquement, la source étant ajoutée par le code.">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-rag-invalid">0</span>
                             <span class="kpi-sublabel" id="kpi-rag-suspect">0 réponse(s) suspecte(s)</span>
@@ -366,9 +366,18 @@
                         <div class="kpi-content">
                             <div class="kpi-label-row">
                                 <span class="kpi-label">Replis suspects</span>
-                                <span class="info-tip" tabindex="0" data-tooltip="Réponses « je ne sais pas » du modèle alors que le premier extrait était très pertinent (titre de colonne ou de section cité, ou extrait en tête des deux moteurs de recherche). Indique un refus abusif à examiner dans l'historique.">i</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Réponses « je ne sais pas » du modèle alors que le premier extrait était très pertinent (titre exact de colonne ou de section cité, ou extrait retrouvé par les deux moteurs de recherche). Indique un refus abusif à examiner dans l'historique.">i</span>
                             </div>
                             <span class="kpi-value" id="kpi-rag-suspect-fallback">0</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-requests">
+                        <div class="kpi-content">
+                            <div class="kpi-label-row">
+                                <span class="kpi-label">Source ajoutée par le code</span>
+                                <span class="info-tip" tabindex="0" data-tooltip="Réponses servies avec « D'après le document… » ajouté automatiquement à partir des extraits réellement utilisés (le modèle n'écrit plus de source).">i</span>
+                            </div>
+                            <span class="kpi-value" id="kpi-rag-sources">0</span>
                         </div>
                     </div>
                 </div>

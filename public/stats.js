@@ -578,7 +578,8 @@ async function loadStats() {
         document.getElementById('kpi-rag-nollm-detail').textContent =
             `${formatNumber(rag.fallbackNoLLM || 0)} repli(s) · ${formatNumber(rag.cacheHits || 0)} cache`;
         document.getElementById('kpi-rag-invalid').textContent = formatNumber(rag.invalidCitations || 0);
-        document.getElementById('kpi-rag-suspect').textContent = `${formatNumber(rag.suspectAnswers || 0)} réponse(s) suspecte(s)`;
+        document.getElementById('kpi-rag-suspect').textContent = `${formatNumber(rag.suspectAnswers || 0)} réponse(s) concernée(s)`;
+        document.getElementById('kpi-rag-sources').textContent = formatNumber(rag.sourcesAdded || 0);
         document.getElementById('kpi-rag-suspect-fallback').textContent = formatNumber(rag.suspectFallbacks || 0);
 
         // Uptime bar

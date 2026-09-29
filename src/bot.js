@@ -20,13 +20,11 @@ const RAG_OPTIONS = ragOptionsFromEnv();
 const CHAT_TEMPERATURE = 0.1;
 const CHAT_MAX_TOKENS = 400;
 
-// Score de fusion (RRF, k = 60) atteint quand le bloc est dans le top 3 des deux moteurs à la fois
-const STRONG_TOP_SCORE = 1 / 61 + 1 / 63;
-
-// Premier bloc « très pertinent » : titre de colonne/section cité entre guillemets, ou bloc en
-// tête des recherches vectorielle et lexicale. Sert à repérer les replis suspects (stats).
+// Premier bloc « très pertinent » : titre exact de colonne/section cité entre guillemets, ou bloc
+// retrouvé à la fois par la recherche vectorielle et par BM25. Sert à repérer les replis suspects
+// (stats) : ils sont mesurés, jamais relancés automatiquement (un seul appel LLM par question).
 function isStrongTop(top) {
-    return !!top && (top.phrase >= 3 || (top.vector !== null && top.bm25 !== null && top.score >= STRONG_TOP_SCORE));
+    return !!top && (top.phrase >= 5 || (top.vector !== null && top.bm25 !== null));
 }
 
 function cosine(a, b) {

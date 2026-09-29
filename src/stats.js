@@ -17,6 +17,7 @@ function emptyRagCounters() {
         fallbackNoLLM: 0,      // formules de repli servies sans appel LLM
         cacheHits: 0,          // réponses servies depuis le cache (0 token)
         invalidCitations: 0,   // noms de fichiers cités hors extraits (retirés de la réponse)
+        sourcesAdded: 0,       // réponses dont la source a été ajoutée par le code (finalizeAnswer)
         suspectAnswers: 0,     // réponses sans citation valide et sans balise
         suspectFallbacks: 0,   // [SANS_REPONSE] du LLM alors que le premier bloc était très pertinent
     };
@@ -226,7 +227,8 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
 /**
  * Met à jour les compteurs RAG (session + global) à partir des détails d'une question.
  * @param {{chunks?: number, extraitsTokens?: number, confident?: boolean, llmSkipped?: boolean,
- *   cached?: boolean, invalidCitations?: number, suspect?: boolean, suspectFallback?: boolean}} rag
+ *   cached?: boolean, invalidCitations?: number, suspect?: boolean, suspectFallback?: boolean,
+ *   sourceAdded?: boolean}} rag
  */
 function trackRag(rag) {
     for (const counters of [botStats.session.rag, globalStats.rag]) {
@@ -237,6 +239,7 @@ function trackRag(rag) {
         if (rag.confident) counters.confident += 1;
         if (rag.llmSkipped) counters.fallbackNoLLM += 1;
         counters.invalidCitations += rag.invalidCitations || 0;
+        if (rag.sourceAdded) counters.sourcesAdded += 1;
         if (rag.suspect) counters.suspectAnswers += 1;
         if (rag.suspectFallback) counters.suspectFallbacks += 1;
     }
