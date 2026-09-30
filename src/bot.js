@@ -6,6 +6,7 @@ import {
 import { finalizeAnswer } from './finalizeAnswer.js';
 import { logRagDebug, describeChunks } from './ragDebugLog.js';
 import aiControl from './aiControl.js';
+import { mistralMonitor } from './alerts.js';
 const { ActivityHandler } = botbuilder;
 
 // Mémoire courte : historique des conversations par utilisateur (en RAM)
@@ -451,16 +452,24 @@ class RAGBot extends ActivityHandler {
         messages.push({ role: 'user', content: userPromptParts.join('\n\n') });
 
         // 6. Appel à Mistral (avec retry automatique sur 429) : un seul appel par question.
+        // Échec après les nouvelles tentatives : alerte Bitrix (une seule par incident, cf. alerts.js).
         const requestStartTime = Date.now();
-        const chatResponse = await callWithRetry(
-            () => this.mistralClient.chat.complete({
-                model: 'mistral-small-latest',
-                messages: messages,
-                temperature: CHAT_TEMPERATURE,
-                maxTokens: CHAT_MAX_TOKENS,
-            }),
-            'chat.complete'
-        );
+        let chatResponse;
+        try {
+            chatResponse = await callWithRetry(
+                () => this.mistralClient.chat.complete({
+                    model: 'mistral-small-latest',
+                    messages: messages,
+                    temperature: CHAT_TEMPERATURE,
+                    maxTokens: CHAT_MAX_TOKENS,
+                }),
+                'chat.complete'
+            );
+        } catch (error) {
+            mistralMonitor.reportFailure(error);
+            throw error;
+        }
+        mistralMonitor.reportSuccess();
         const responseTimeMs = Date.now() - requestStartTime;
 
         // Sources ajoutées par le code : les citations écrites par le modèle sont retirées (noms de

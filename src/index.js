@@ -14,9 +14,16 @@ import { loadCache, saveCache } from './cacheManager.js';
 import { fileToChunks } from './ingestion.js';
 import { LocalRamVectorStore } from './vectorStore.js';
 import aiControl from './aiControl.js';
+import { sendBitrixMessage, describeAiTransition, describeStartup, installCrashAlerts } from './alerts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// --- ALERTES BITRIX (cf. alerts.js) ---
+installCrashAlerts();
+aiControl.onChange((event) => {
+    sendBitrixMessage(describeAiTransition(event));
+});
 
 // --- BOT FRAMEWORK ADAPTER ---
 const adapter = new BotFrameworkAdapter({
@@ -705,6 +712,8 @@ app.listen(PORT, async () => {
         await refreshKnowledgeBase(broadcastEvent);
         res.json({ status: "Base de connaissances mise à jour avec succès !" });
     });
+
+    sendBitrixMessage(describeStartup(aiControl.getStatus()));
 
     console.log("------------------------------------------");
     console.log(`🚀 BOT PRÊT ! Connectez Bot Framework Emulator sur : http://localhost:${PORT}/api/messages`);

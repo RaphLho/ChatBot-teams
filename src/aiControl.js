@@ -13,7 +13,8 @@ const CONTROL_FILE = path.join(__dirname, '../data/ai_control.json');
 //   levée quand la période change, quand le compteur est remis à zéro, quand la limite est
 //   augmentée ou désactivée.
 // Tant que l'une des deux est active, askQuestion répond par un message fixe sans aucun appel
-// Mistral (ni chat, ni embedding).
+// Mistral (ni chat, ni embedding). Chaque changement d'état est signalé à l'écouteur enregistré
+// par onChange (alertes Bitrix, cf. alerts.js).
 
 export const LIMIT_TYPES = ['tokens', 'messages'];
 export const LIMIT_PERIODS = ['day', 'month', 'total'];
@@ -45,6 +46,7 @@ function defaultState(now) {
  */
 export function createAiControl({ file = CONTROL_FILE, now = () => new Date() } = {}) {
     let state = defaultState(now());
+    let listener = null;
 
     if (file && fs.existsSync(file)) {
         try {
@@ -77,30 +79,72 @@ export function createAiControl({ file = CONTROL_FILE, now = () => new Date() } 
         state.usage = { periodKey: periodKey(state.limit.period, date), since: date.getTime(), tokens: 0, messages: 0 };
     }
 
+    // Raison de la coupure d'après l'état tel qu'il est (sans changement de période).
+    function currentReason() {
+        if (!state.enabled) return 'stopped';
+        const { enabled, type, max } = state.limit;
+        if (enabled && max > 0 && state.usage[type] >= max) return 'limit';
+        return null;
+    }
+
+    function snapshot() {
+        const reason = currentReason();
+        return {
+            active: reason === null,
+            reason,
+            enabled: state.enabled,
+            stoppedAt: state.stoppedAt,
+            limit: { ...state.limit },
+            usage: { ...state.usage },
+            limitReached: state.limit.enabled && state.limit.max > 0 && state.usage[state.limit.type] >= state.limit.max,
+            blockedQuestions: state.blockedQuestions,
+        };
+    }
+
+    /**
+     * Applique une modification et, si la raison de coupure change (active → arrêtée, limite
+     * atteinte → active…), prévient l'écouteur. Les erreurs de l'écouteur n'interrompent jamais
+     * la modification.
+     * @param {'manual'|'usage'|'period'|'reset'|'limit'} cause
+     */
+    function transition(cause, mutate) {
+        const before = snapshot();
+        mutate();
+        save();
+        const after = snapshot();
+        if (listener && before.reason !== after.reason) {
+            try {
+                listener({ from: before.reason, to: after.reason, cause, before, after });
+            } catch (e) {
+                console.error("Erreur de l'écouteur du contrôle de l'IA :", e);
+            }
+        }
+    }
+
     // Nouveau jour / nouveau mois : le compteur repart de zéro (et une coupure due à la limite
     // se lève d'elle-même).
     function rollPeriod() {
         if (state.usage.periodKey !== periodKey(state.limit.period, now())) {
-            resetUsage();
-            save();
+            transition('period', resetUsage);
         }
-    }
-
-    function isLimitReached() {
-        rollPeriod();
-        const { enabled, type, max } = state.limit;
-        return enabled && max > 0 && state.usage[type] >= max;
     }
 
     /** Raison de la coupure en cours : 'stopped', 'limit', ou null si l'IA peut répondre. */
     function blockReason() {
-        if (!state.enabled) return 'stopped';
-        if (isLimitReached()) return 'limit';
-        return null;
+        rollPeriod();
+        return currentReason();
     }
 
     return {
         blockReason,
+
+        /**
+         * Enregistre l'écouteur des changements d'état :
+         * fn({ from, to, cause, before, after }) avec from/to ∈ {null, 'stopped', 'limit'}.
+         */
+        onChange(fn) {
+            listener = fn;
+        },
 
         /** Message servi à la place d'une réponse quand l'IA est coupée (null si elle est active). */
         blockedMessage() {
@@ -115,17 +159,20 @@ export function createAiControl({ file = CONTROL_FILE, now = () => new Date() } 
         record({ tokens = 0, messages = 0 }) {
             if (!tokens && !messages) return;
             rollPeriod();
-            state.usage.tokens += tokens;
-            state.usage.messages += messages;
-            save();
+            transition('usage', () => {
+                state.usage.tokens += tokens;
+                state.usage.messages += messages;
+            });
         },
 
         setEnabled(enabled) {
-            state.enabled = !!enabled;
-            state.stoppedAt = state.enabled ? null : now().getTime();
-            // Le compteur de questions refusées porte sur la coupure en cours.
-            state.blockedQuestions = 0;
-            save();
+            rollPeriod();
+            transition('manual', () => {
+                state.enabled = !!enabled;
+                state.stoppedAt = state.enabled ? null : now().getTime();
+                // Le compteur de questions refusées porte sur la coupure en cours.
+                state.blockedQuestions = 0;
+            });
         },
 
         /**
@@ -150,32 +197,26 @@ export function createAiControl({ file = CONTROL_FILE, now = () => new Date() } 
                 }
                 next.max = n;
             }
-            const periodChanged = next.period !== state.limit.period;
-            const wasBlockedByLimit = isLimitReached();
-            state.limit = next;
-            if (periodChanged) resetUsage();
-            if (wasBlockedByLimit && !isLimitReached()) state.blockedQuestions = 0;
-            save();
+            rollPeriod();
+            transition('limit', () => {
+                const periodChanged = next.period !== state.limit.period;
+                const wasBlockedByLimit = currentReason() === 'limit';
+                state.limit = next;
+                if (periodChanged) resetUsage();
+                if (wasBlockedByLimit && currentReason() !== 'limit') state.blockedQuestions = 0;
+            });
         },
 
         resetCounter() {
-            resetUsage();
-            state.blockedQuestions = 0;
-            save();
+            transition('reset', () => {
+                resetUsage();
+                if (state.enabled) state.blockedQuestions = 0;
+            });
         },
 
         getStatus() {
-            const reason = blockReason();
-            return {
-                active: reason === null,
-                reason,
-                enabled: state.enabled,
-                stoppedAt: state.stoppedAt,
-                limit: { ...state.limit },
-                usage: { ...state.usage },
-                limitReached: isLimitReached(),
-                blockedQuestions: state.blockedQuestions,
-            };
+            rollPeriod();
+            return snapshot();
         },
     };
 }
