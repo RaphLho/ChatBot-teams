@@ -6,6 +6,8 @@
 //    une liste numérotée terminée par « Autres (à préciser) ». Le message suivant (« 2 »,
 //    « Formulaire de stage »…) est rattaché à la question d'origine par resolveClarification.
 
+import { tokenize } from './ragBoost.js';
+
 const normalize = (s) => (s || '').toString().toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[’']/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -91,4 +93,33 @@ export function resolveClarification(message, options) {
     }
     if (chosen) return { type: 'option', label: chosen.label };
     return { type: 'free', text: message.trim() };
+}
+
+// Mots qui ne désignent aucun objet précis (« j'ai une question sur… », « un souci avec… »).
+const VAGUE_WORDS = new Set([
+    'je', 'ai', 'tu', 'vous', 'nous', 'me', 'mon', 'ma', 'mes', 'votre', 'vos', 'question', 'questions',
+    'souci', 'soucis', 'probleme', 'problemes', 'aide', 'aider', 'besoin', 'info', 'infos', 'information',
+    'informations', 'renseignement', 'renseignements', 'savoir', 'voudrais', 'veux', 'voulais', 'peux',
+    'pouvez', 'puis', 'sujet', 'concernant', 'propos', 'svp', 'stp', 'bonjour', 'merci', 'demande',
+].flatMap((w) => tokenize(w)));
+
+const SUBJECT_MAX_CHARS = 110;
+
+/**
+ * Sujets distincts des extraits quand la question est trop courte ou générale pour savoir lequel
+ * est visé (null sinon). Signalés au modèle pour qu'il pose une question de clarification.
+ * - au plus 3 mots porteurs de sens et au moins 2 sujets (fichier › section) différents ;
+ * - ou au plus 6 mots porteurs de sens et des extraits issus d'au moins 3 fichiers différents.
+ * Une expression entre guillemets vise un objet précis : jamais de clarification suggérée.
+ * @param {string} question
+ * @param {{file: string, source: string}[]} chunks
+ */
+export function suggestClarification(question, chunks) {
+    if (!chunks || chunks.length < 2 || /[«»"“”]/.test(question)) return null;
+    const words = tokenize(question).filter((t) => !VAGUE_WORDS.has(t));
+    const subjects = [...new Set(chunks.map((c) => c.source))];
+    const files = new Set(chunks.map((c) => c.file));
+    const vague = (words.length <= 3 && subjects.length >= 2) || (words.length <= 6 && files.size >= 3);
+    if (!vague) return null;
+    return subjects.slice(0, 5).map((s) => (s.length > SUBJECT_MAX_CHARS ? `${s.slice(0, SUBJECT_MAX_CHARS - 1)}…` : s));
 }

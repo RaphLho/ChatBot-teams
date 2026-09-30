@@ -74,3 +74,29 @@ test('prompts : règle de ton et de clarification dans les trois modes', () => {
     assert.match(p, /« Autres \(à préciser\) »/, mode);
   }
 });
+
+test('suggestClarification : question vague et extraits sur plusieurs sujets', async () => {
+  const { suggestClarification } = await import('../src/conversation.js');
+  const chunks = [
+    makeChunk('Formulaires.docx', 'Formulaire de stage', 'Formulaire de stage à remplir.', 0),
+    makeChunk('Formulaires.docx', 'Formulaire de rentrée', 'Formulaire de rentrée à remplir.', 1),
+    makeChunk('Démission.docx', 'Formulaire de démission', 'Formulaire de démission.', 2),
+  ];
+  assert.deepEqual(suggestClarification("J'ai une question sur un formulaire", chunks), [
+    'Formulaires.docx › Formulaire de stage', 'Formulaires.docx › Formulaire de rentrée', 'Démission.docx › Formulaire de démission',
+  ]);
+  assert.ok(suggestClarification("J'ai un souci avec un kanban", chunks));
+  assert.ok(suggestClarification('Comment faire une procédure ?', chunks));
+  // Question précise, expression citée, ou un seul sujet : pas de clarification suggérée
+  assert.equal(suggestClarification('Quel délai pour remplir le formulaire de stage avant le départ en entreprise en alternance ?', chunks), null);
+  assert.equal(suggestClarification('Que faire dans la colonne « Intéressé » ?', chunks), null);
+  assert.equal(suggestClarification('un formulaire', [chunks[0], chunks[0]]), null);
+});
+
+test('prompts : clarification prioritaire, plus de « réponds pour chacun »', () => {
+  for (const [mode, p] of Object.entries(SYSTEM_PROMPTS)) {
+    assert.match(p, /Clarifie AVANT de répondre/, mode);
+    assert.match(p, /<INDICATION>/, mode);
+    assert.doesNotMatch(p, /réponds pour chacun|réponds pour chaque kanban/, mode);
+  }
+});
