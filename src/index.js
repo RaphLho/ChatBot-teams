@@ -13,6 +13,7 @@ import { listOneDriveFiles, downloadFilesBuffers, getOneDriveFolderUrl } from '.
 import { loadCache, saveCache } from './cacheManager.js';
 import { fileToChunks } from './ingestion.js';
 import { LocalRamVectorStore } from './vectorStore.js';
+import aiControl from './aiControl.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -603,6 +604,34 @@ app.get('/api/stats/history', requireStatsAuthApi, (req, res) => {
         weekday,
         topUsers
     });
+});
+
+// --- CONTRÔLE DE L'IA (arrêt manuel et limite d'utilisation, cf. aiControl.js) ---
+app.get('/api/ai-control', requireStatsAuthApi, (req, res) => {
+    res.json(aiControl.getStatus());
+});
+
+app.post('/api/ai-control/toggle', requireStatsAuthApi, (req, res) => {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Paramètre enabled manquant.' });
+    aiControl.setEnabled(enabled);
+    console.log(enabled ? "▶️  IA réactivée depuis la page de statistiques." : "⏸️  IA arrêtée depuis la page de statistiques.");
+    res.json(aiControl.getStatus());
+});
+
+app.post('/api/ai-control/limit', requireStatsAuthApi, (req, res) => {
+    const { enabled, type, max, period } = req.body || {};
+    try {
+        aiControl.setLimit({ enabled, type, max, period });
+    } catch (e) {
+        return res.status(400).json({ error: e.message });
+    }
+    res.json(aiControl.getStatus());
+});
+
+app.post('/api/ai-control/reset', requireStatsAuthApi, (req, res) => {
+    aiControl.resetCounter();
+    res.json(aiControl.getStatus());
 });
 
 // --- ACTUALISATION AUTOMATIQUE ---

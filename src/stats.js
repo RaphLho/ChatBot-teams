@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import aiControl from './aiControl.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -222,6 +223,13 @@ function recordUsage(promptTokens, completionTokens, userId = 'unknown', questio
 
     // Sauvegarde sur disque
     saveGlobalStats();
+
+    // 5. Limite d'utilisation de l'IA (cf. aiControl.js) : tokens des questions (chat + embedding
+    // de recherche), hors indexation des documents ; un message = une réponse du modèle de chat.
+    aiControl.record({
+        tokens: userId === 'embedding_indexation' ? 0 : totalTk,
+        messages: isChat ? 1 : 0,
+    });
 }
 
 /**
@@ -280,6 +288,8 @@ function recordLocalAnswer({ userId, question, answer, displayName = '', isNoAns
     }
     trackRag(rag);
     saveGlobalStats();
+    // Réponse sans appel LLM (0 token), mais bien un message servi : compte pour la limite.
+    aiControl.record({ messages: 1 });
 }
 
 /**

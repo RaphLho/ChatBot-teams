@@ -67,6 +67,64 @@
             <div class="stats-scroll-area">
 
                 <!-- ============================================ -->
+                <!-- Contrôle de l'IA (arrêt / limite)             -->
+                <!-- ============================================ -->
+                <div class="section-title">Contrôle de l'IA</div>
+                <div class="ai-control-card" id="ai-control-card">
+                    <div class="ai-control-main">
+                        <div class="ai-control-status">
+                            <span class="ai-status-dot" id="ai-status-dot"></span>
+                            <div>
+                                <h3 id="ai-status-title">Chargement…</h3>
+                                <span id="ai-status-detail"></span>
+                            </div>
+                        </div>
+                        <button type="button" class="ai-toggle-btn" id="ai-toggle-btn" disabled>…</button>
+                    </div>
+
+                    <div class="ai-limit">
+                        <label class="ai-switch">
+                            <input type="checkbox" id="ai-limit-enabled">
+                            <span class="ai-switch-track"></span>
+                            <span class="ai-switch-label">Couper l'IA automatiquement au-delà d'une limite</span>
+                        </label>
+
+                        <div class="ai-limit-form" id="ai-limit-form">
+                            <label>
+                                <span>Maximum</span>
+                                <input type="number" id="ai-limit-max" min="1" step="1" inputmode="numeric">
+                            </label>
+                            <label>
+                                <span>Unité</span>
+                                <select id="ai-limit-type">
+                                    <option value="tokens">tokens</option>
+                                    <option value="messages">messages</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>Période</span>
+                                <select id="ai-limit-period">
+                                    <option value="day">par jour</option>
+                                    <option value="month">par mois</option>
+                                    <option value="total">jusqu'à remise à zéro</option>
+                                </select>
+                            </label>
+                            <button type="button" class="files-toggle-btn" id="ai-limit-save">Enregistrer</button>
+                        </div>
+
+                        <div class="ai-usage">
+                            <div class="ai-usage-row">
+                                <span id="ai-usage-text">—</span>
+                                <button type="button" class="ai-link-btn" id="ai-usage-reset" title="Remettre le compteur de la période à zéro">Remettre à zéro</button>
+                            </div>
+                            <div class="ai-usage-bar"><div class="ai-usage-fill" id="ai-usage-fill"></div></div>
+                            <span class="ai-usage-hint" id="ai-usage-hint"></span>
+                        </div>
+                        <p class="ai-control-error" id="ai-control-error" hidden></p>
+                    </div>
+                </div>
+
+                <!-- ============================================ -->
                 <!-- Modèles IA                                    -->
                 <!-- ============================================ -->
                 <div class="section-title">Modèles IA</div>

@@ -1284,3 +1284,146 @@ document.querySelectorAll('.chart-toggle-btn').forEach(btn => {
         loadStats();
     });
 });
+
+// ============================================
+// Contrôle de l'IA : arrêt manuel et limite d'utilisation
+// ============================================
+const AI_PERIOD_LABELS = { day: "aujourd'hui", month: 'ce mois-ci', total: 'depuis la dernière remise à zéro' };
+
+let aiControlStatus = null;
+// Le formulaire n'est rempli depuis le serveur qu'au chargement et après un enregistrement,
+// pour ne pas écraser une saisie en cours lors de l'actualisation automatique.
+let aiLimitFormDirty = false;
+
+function renderAiControl(status, { fillForm = false } = {}) {
+    aiControlStatus = status;
+    const card = document.getElementById('ai-control-card');
+    const title = document.getElementById('ai-status-title');
+    const detail = document.getElementById('ai-status-detail');
+    const toggleBtn = document.getElementById('ai-toggle-btn');
+
+    card.classList.toggle('is-stopped', status.reason === 'stopped');
+    card.classList.toggle('is-limit', status.reason === 'limit');
+
+    const blocked = status.blockedQuestions
+        ? ` · ${formatNumber(status.blockedQuestions)} question(s) refusée(s)`
+        : '';
+    if (status.reason === 'stopped') {
+        title.textContent = "IA arrêtée";
+        detail.textContent = `Arrêtée le ${formatTimestamp(status.stoppedAt)} : aucune réponse n'est donnée${blocked}`;
+    } else if (status.reason === 'limit') {
+        title.textContent = "IA coupée : limite atteinte";
+        detail.textContent = status.limit.period === 'total'
+            ? `Augmentez la limite, remettez le compteur à zéro ou désactivez la limite${blocked}`
+            : `Reprise automatique à la prochaine période, ou augmentez / désactivez la limite${blocked}`;
+    } else {
+        title.textContent = "IA active";
+        detail.textContent = "Le chatbot répond normalement aux questions.";
+    }
+
+    toggleBtn.disabled = false;
+    toggleBtn.textContent = status.enabled ? "⏹ Arrêter l'IA" : "▶ Réactiver l'IA";
+    toggleBtn.classList.toggle('is-resume', !status.enabled);
+
+    const limit = status.limit;
+    document.getElementById('ai-limit-enabled').checked = limit.enabled;
+    document.querySelector('.ai-limit').classList.toggle('is-off', !limit.enabled);
+    if (fillForm || !aiLimitFormDirty) {
+        document.getElementById('ai-limit-max').value = limit.max;
+        document.getElementById('ai-limit-type').value = limit.type;
+        document.getElementById('ai-limit-period').value = limit.period;
+        aiLimitFormDirty = false;
+    }
+
+    const used = status.usage[limit.type] || 0;
+    const ratio = limit.max > 0 ? Math.min(used / limit.max, 1) : 0;
+    const fill = document.getElementById('ai-usage-fill');
+    fill.style.width = `${Math.round(ratio * 100)}%`;
+    fill.classList.toggle('is-warn', ratio >= 0.8 && ratio < 1);
+    fill.classList.toggle('is-full', ratio >= 1);
+    document.getElementById('ai-usage-text').textContent =
+        `${used.toLocaleString("fr-FR")} / ${limit.max.toLocaleString("fr-FR")} ${limit.type} ${AI_PERIOD_LABELS[limit.period]} (${Math.round(ratio * 100)} %)`;
+    document.getElementById('ai-usage-hint').textContent = limit.enabled
+        ? `Compteur démarré le ${formatTimestamp(status.usage.since)}. Tokens : questions uniquement (hors indexation des documents).`
+        : "Limite désactivée : la consommation est comptée mais l'IA n'est jamais coupée.";
+}
+
+function showAiControlError(message) {
+    const el = document.getElementById('ai-control-error');
+    el.textContent = message || '';
+    el.hidden = !message;
+}
+
+async function aiControlRequest(url, body) {
+    showAiControlError('');
+    try {
+        const res = await fetch(url, {
+            method: body === undefined ? 'GET' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+        return data;
+    } catch (e) {
+        showAiControlError(`Impossible de mettre à jour le contrôle de l'IA : ${e.message}`);
+        return null;
+    }
+}
+
+async function loadAiControl(options) {
+    const status = await aiControlRequest('/api/ai-control');
+    if (status) renderAiControl(status, options);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const card = document.getElementById('ai-control-card');
+    if (!card) return;
+
+    loadAiControl({ fillForm: true });
+    setInterval(loadAiControl, 15000);
+
+    document.getElementById('ai-toggle-btn').addEventListener('click', async (e) => {
+        if (!aiControlStatus) return;
+        const btn = e.currentTarget;
+        const enable = !aiControlStatus.enabled;
+        if (!enable && !confirm("Arrêter l'IA ? Le chatbot ne répondra plus à aucune question jusqu'à sa réactivation.")) return;
+        btn.disabled = true;
+        const status = await aiControlRequest('/api/ai-control/toggle', { enabled: enable });
+        if (status) renderAiControl(status);
+        else btn.disabled = false;
+    });
+
+    document.getElementById('ai-limit-enabled').addEventListener('change', async (e) => {
+        const status = await aiControlRequest('/api/ai-control/limit', { enabled: e.target.checked });
+        if (status) renderAiControl(status);
+        else e.target.checked = !e.target.checked;
+    });
+
+    ['ai-limit-max', 'ai-limit-type', 'ai-limit-period'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => { aiLimitFormDirty = true; });
+    });
+
+    document.getElementById('ai-limit-save').addEventListener('click', async () => {
+        const max = Number(document.getElementById('ai-limit-max').value);
+        if (!Number.isInteger(max) || max < 1) {
+            showAiControlError('La limite doit être un nombre entier supérieur ou égal à 1.');
+            return;
+        }
+        const period = document.getElementById('ai-limit-period').value;
+        if (aiControlStatus && period !== aiControlStatus.limit.period
+            && !confirm('Changer de période remet le compteur à zéro. Continuer ?')) return;
+        const status = await aiControlRequest('/api/ai-control/limit', {
+            max,
+            type: document.getElementById('ai-limit-type').value,
+            period,
+        });
+        if (status) renderAiControl(status, { fillForm: true });
+    });
+
+    document.getElementById('ai-usage-reset').addEventListener('click', async () => {
+        if (!confirm('Remettre le compteur de consommation à zéro ?')) return;
+        const status = await aiControlRequest('/api/ai-control/reset', {});
+        if (status) renderAiControl(status);
+    });
+});

@@ -5,6 +5,7 @@ import {
 } from './ragBoost.js';
 import { finalizeAnswer } from './finalizeAnswer.js';
 import { logRagDebug, describeChunks } from './ragDebugLog.js';
+import aiControl from './aiControl.js';
 const { ActivityHandler } = botbuilder;
 
 // Mémoire courte : historique des conversations par utilisateur (en RAM)
@@ -311,6 +312,11 @@ class RAGBot extends ActivityHandler {
      *   de savoir à qui il parle sans le redemander, et fait apparaître son nom dans les statistiques.
      */
     async askQuestion(userQuestion, userId, mode = null, profile = null) {
+        // 0. IA coupée depuis la page de statistiques (arrêt manuel ou limite atteinte) : message
+        // fixe, aucun appel Mistral, rien dans l'historique ni dans les statistiques.
+        const blocked = aiControl.blockedMessage();
+        if (blocked) return blocked;
+
         const displayName = getProfileDisplayName(profile);
         const history = userHistory.get(userId) || [];
         const previous = history[history.length - 1] || null;
