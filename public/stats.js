@@ -877,6 +877,8 @@ function renderHistoryEntries(entries, filter) {
         // Réponses servies sans appel LLM (cache ou formule de repli) : 0 token
         const modelLabel = entry.local === 'cache' ? 'cache (0 token)'
             : entry.local === 'fallback' ? 'repli sans LLM'
+            : entry.local === 'courtesy' ? 'salutation (0 token)'
+            : entry.local === 'clarification' ? 'clarification (0 token)'
             : isChat ? 'mistral-small' : 'mistral-embed';
         const modelClass = isChat ? 'chat' : 'embed';
 

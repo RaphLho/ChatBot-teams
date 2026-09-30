@@ -2935,3 +2935,58 @@ body {
     .ai-limit-form label { flex: 1 1 140px; }
     .ai-limit-form input { width: 100%; }
 }
+
+/* ============================================ */
+/* Question de clarification : choix cliquables */
+/* ============================================ */
+.clarify-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.clarify-choice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.clarify-choice:hover:not(:disabled) {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.clarify-choice:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+.clarify-choice:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.clarify-choice-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--primary-light);
+    font-size: 0.78rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}

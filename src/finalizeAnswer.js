@@ -1,13 +1,14 @@
 import { tokenize } from './ragBoost.js';
 
 // Réponses qui ne s'appuient sur aucun extrait et ne doivent donc recevoir aucune source :
-// demande de formation (PÉRIMÈTRE DE FORMATION) et refus de sécurité (SÉCURITÉ).
+// demande de formation (PÉRIMÈTRE DE FORMATION) et refus de sécurité (SÉCURITÉ). Les réponses
+// balisées (repli, hors périmètre, question de clarification) n'en reçoivent pas non plus.
 const NO_SOURCE = /pouvez-vous m['’]indiquer votre formation et votre ann[ée]e|Je ne peux pas d[ée]tailler mon fonctionnement interne/i;
 
 // Remplace checkCitations : la source n'est plus écrite par le modèle mais ajoutée par le code
 // à partir des blocs réellement envoyés (0 token). Nom de fichier inventé => impossible.
 export function finalizeAnswer(raw, chunks, { minShare = 0.12, relShare = 0.4, noSource = NO_SOURCE } = {}) {
-  const tagged = /\[(SANS_REPONSE|NON-CONFORME)\]/.test(raw);
+  const tagged = /\[(SANS_REPONSE|NON-CONFORME|CLARIFICATION)\]/.test(raw);
   if (tagged || !chunks.length) return { text: raw.trim(), files: [], invalid: [], suspect: false };
 
   // 1. Retire les citations écrites par le modèle (lignes de citation, « D'après l'extrait [1] du fichier X : »)

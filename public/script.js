@@ -68,12 +68,70 @@ function createMessageElement(text, isUser = false) {
     } else {
         // Parse markdown if possible, otherwise innerHTML (already formatted by server or plain text)
         bubbleDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : text;
+        renderClarificationChoices(bubbleDiv, text);
     }
 
     msgDiv.appendChild(avatarDiv);
     msgDiv.appendChild(bubbleDiv);
 
     return msgDiv;
+}
+
+// --- Question de clarification : choix cliquables ---
+// Une réponse du bot dont la liste numérotée se termine par « Autres (à préciser) » est une
+// question de clarification (cf. src/conversation.js) : la liste est remplacée par des boutons.
+// Un choix envoie « 2. Intitulé » ; « Autres » laisse la personne écrire librement sa précision.
+const CLARIFICATION_DEFAULT_PLACEHOLDER = messageInput.placeholder;
+
+function parseClarificationChoices(text) {
+    const choices = [];
+    for (const line of (text || '').split('\n')) {
+        const m = line.match(/^\s*(\d{1,2})\s*[.)]\s+(.+?)\s*$/);
+        if (m) choices.push({ n: m[1], label: m[2].replace(/\*\*/g, '') });
+    }
+    const last = choices[choices.length - 1];
+    return choices.length >= 2 && /^autres?\b/i.test(last.label) ? choices : null;
+}
+
+function renderClarificationChoices(bubbleDiv, text) {
+    const choices = parseClarificationChoices(text);
+    if (!choices) return;
+    const lists = bubbleDiv.querySelectorAll('ol');
+    const list = lists[lists.length - 1];
+    if (list && list.children.length === choices.length) list.remove();
+
+    const wrap = document.createElement('div');
+    wrap.className = 'clarify-choices';
+    choices.forEach(choice => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'clarify-choice';
+        btn.disabled = true; // activé seulement sur le dernier message (cf. refreshClarificationChoices)
+        const num = document.createElement('span');
+        num.className = 'clarify-choice-num';
+        num.textContent = choice.n;
+        btn.append(num, document.createTextNode(choice.label));
+        btn.addEventListener('click', () => {
+            if (/^autres?\b/i.test(choice.label)) {
+                messageInput.placeholder = 'Précisez votre demande…';
+                messageInput.focus();
+                return;
+            }
+            messageInput.value = `${choice.n}. ${choice.label}`;
+            form.requestSubmit();
+        });
+        wrap.appendChild(btn);
+    });
+    bubbleDiv.appendChild(wrap);
+}
+
+// Seuls les choix du dernier message du bot restent cliquables.
+function refreshClarificationChoices() {
+    chatContainer.querySelectorAll('.clarify-choice').forEach(b => { b.disabled = true; });
+    const last = chatContainer.lastElementChild;
+    if (last && last.classList.contains('bot')) {
+        last.querySelectorAll('.clarify-choice').forEach(b => { b.disabled = false; });
+    }
 }
 
 function showTypingIndicator() {
@@ -230,6 +288,7 @@ function loadConversationIntoUI(conv) {
         conv.messages.forEach(m => {
             chatContainer.appendChild(createMessageElement(m.text, m.role === 'user'));
         });
+        refreshClarificationChoices();
     }
 
     scrollToBottom();
@@ -486,6 +545,7 @@ form.addEventListener('submit', async (e) => {
 
     const question = messageInput.value.trim();
     if (!question || !currentConversation) return;
+    messageInput.placeholder = CLARIFICATION_DEFAULT_PLACEHOLDER;
 
     // 1. Add user message to UI + historique local
     const userMsg = createMessageElement(question, true);
@@ -547,6 +607,7 @@ form.addEventListener('submit', async (e) => {
         chatContainer.appendChild(errorMsg);
     } finally {
         sendBtn.disabled = false;
+        refreshClarificationChoices();
         scrollToBottom();
         messageInput.focus();
     }

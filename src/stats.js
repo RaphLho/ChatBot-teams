@@ -258,7 +258,8 @@ function trackRag(rag) {
  * aucun extrait n'est assez pertinent). Elle apparaît dans l'historique avec 0 token, sans
  * compter comme une requête Mistral.
  * @param {{userId: string, question: string, answer: string, displayName?: string,
- *   isNoAnswer?: boolean, local: 'cache'|'fallback', rag?: object}} params
+ *   isNoAnswer?: boolean, local: 'cache'|'fallback'|'courtesy'|'clarification', rag?: object|null}} params
+ *   rag null : échange sans recherche (salutation, « Autres » d'une clarification), hors compteurs RAG.
  */
 function recordLocalAnswer({ userId, question, answer, displayName = '', isNoAnswer = false, local, rag = {} }) {
     const entry = {
@@ -286,7 +287,7 @@ function recordLocalAnswer({ userId, question, answer, displayName = '', isNoAns
             globalStats.uniqueUserIds.push(userId);
         }
     }
-    trackRag(rag);
+    if (rag) trackRag(rag);
     saveGlobalStats();
     // Réponse sans appel LLM (0 token), mais bien un message servi : compte pour la limite.
     aiControl.record({ messages: 1 });
